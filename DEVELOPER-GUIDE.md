@@ -58,7 +58,76 @@ machine repo.veyra.co
   Communication Tag Reading** capability on your target. Camera usage description for
   QR scanning.
 
-## 3. Initialise
+## 3. Run this sample app on your phone
+
+Everything below assumes a **physical** device — NFC and device attestation don't work
+on emulators or simulators.
+
+**Once, for both platforms** (from the repository root):
+
+```bash
+npm install
+cp veyra.config.example.ts veyra.config.ts
+# edit veyra.config.ts — your OAuth client id/secret, payment app provider id,
+# token requestor id (and your Apple Team ID for iOS)
+```
+
+`veyra.config.ts` is gitignored — real credentials never get committed.
+
+### Android
+
+1. Add your artifact-repository credentials to `~/.gradle/gradle.properties` (Gradle
+   resolves the native SDK from the authenticated Veyra Maven repository with them):
+
+   ```properties
+   veyraRepoUsername=your-repo-username
+   veyraRepoPassword=your-repo-password
+   ```
+
+2. On the phone: enable **Developer options** (Settings → About phone → tap *Build
+   number* seven times), then turn on **USB debugging**. Plug the phone in over USB and
+   accept the "Allow USB debugging?" prompt. `adb devices` should list it.
+3. Build, install and start Metro in one step:
+
+   ```bash
+   npm run android
+   ```
+
+   JS-only edits hot-reload from then on; rebuild only when native dependencies change.
+
+### iOS
+
+1. Add the same repository credentials to `~/.netrc` (the prebuilt framework downloads
+   and checksum-verifies at `pod install`):
+
+   ```
+   machine repo.veyra.co
+     login your-repo-username
+     password your-repo-password
+   ```
+
+   ```bash
+   chmod 600 ~/.netrc
+   cd ios && pod install && cd ..
+   ```
+
+2. Open `ios/VeyraBank.xcworkspace` in Xcode. On the **VeyraBank** target → *Signing &
+   Capabilities*: select your team, and add the **Near Field Communication Tag
+   Reading** capability (required for tap acceptance).
+3. Select your iPhone as the run destination and press Run — or:
+
+   ```bash
+   npm run ios -- --device
+   ```
+
+   On the first install, trust the developer profile on the phone (Settings → General →
+   VPN & Device Management).
+
+**First sanity check:** the Home screen's *NFC mode* readout should say `NONE`, and flip
+to `WALLET` / `SOFTPOS` only while the Pay / Get-paid screens are focused — that is the
+session model (§5) working.
+
+## 4. Initialise
 
 ```ts
 import Veyra from 'veyra-sdk-react-native';
@@ -79,9 +148,9 @@ await Veyra.initialize({
 
 Call it once at app start (this sample does it in `App.tsx` before rendering
 navigation). It is idempotent and safe across native Activity recreation — the SDK
-re-attaches itself. All SDK failures reject with a typed `VeyraError` (§8).
+re-attaches itself. All SDK failures reject with a typed `VeyraError` (§9).
 
-## 4. Sessions — how payment screens work in React Native
+## 5. Sessions — how payment screens work in React Native
 
 **This is the one genuinely React-Native-specific concept.** The SDK arms the device
 (present as a card / read cards) only for the screen the user is actually on, and
@@ -123,7 +192,7 @@ Rules of the model:
   the imperative `sessions.open/close` — but the hooks are the recommended surface
   because they cannot leak an open session.
 
-## 5. Wallet (Pay) API
+## 6. Wallet (Pay) API
 
 All methods return promises; all failures are typed `VeyraError`s.
 
@@ -184,7 +253,7 @@ PENDING rows), `processReceipt(qrPayload, expectedHash?)` to verify-and-store a 
 merchant receipt, `getReceipts(limit?)`, `getReceiptForTransaction(hash)`.
 `entryMethod` is `'TAP' | 'QR_GENERATED' | 'QR_SCANNED'`.
 
-## 6. Merchant (Get paid) API
+## 7. Merchant (Get paid) API
 
 ### 6.1 Registration & profile
 
@@ -228,7 +297,7 @@ receipt carries `qrCodeBase64` (Android, ready-made PNG) **or** `qrPayload` (iOS
 render it yourself); display whichever is non-null (see
 `MerchantTransactionsScreen.tsx`).
 
-## 7. Events
+## 8. Events
 
 One `NativeEventEmitter` channel per family; subscribe via the typed helpers and
 `remove()` the subscription on unmount:
@@ -240,7 +309,7 @@ One `NativeEventEmitter` channel per family; subscribe via the typed helpers and
 | `merchant.tap.onEvent` | `cardDetected` / `cardContactLost` / `unsupportedCard` / progress / `ended` / `result` |
 | `wallet.onQrExpired` / `merchant.onQrExpired` | one `expired` per rendered QR |
 
-## 8. Errors
+## 9. Errors
 
 Every rejection is a `VeyraError` with a stable `code` — never string-match messages:
 
@@ -258,7 +327,7 @@ Every rejection is a `VeyraError` with a stable `code` — never string-match me
 | `VALIDATION` (`field`) | fix the named parameter |
 | `MISSING_MANDATORY_CONFIG` / `REQUEST_FAILED` / `UNKNOWN` | configuration / backend / other |
 
-## 9. Platform availability at a glance
+## 10. Platform availability at a glance
 
 | Capability | Android | iOS |
 |---|---|---|
@@ -269,7 +338,7 @@ Every rejection is a `VeyraError` with a stable `code` — never string-match me
 | Receipt QR | PNG (`qrCodeBase64`) | payload (`qrPayload`) |
 | `appleTeamId` | — | required |
 
-## 10. Troubleshooting
+## 11. Troubleshooting
 
 - **`SESSION_REQUIRED` on a payment call** — the screen calling tap APIs must mount its
   session hook and be focused. Check you pass `useIsFocused()` (not `true`).

@@ -203,7 +203,7 @@ Rules of the model:
 
 All methods return promises; all failures are typed `VeyraError`s.
 
-### 5.1 Add a card
+### 6.1 Add a card
 
 | Method | Notes |
 |---|---|
@@ -216,7 +216,7 @@ All methods return promises; all failures are typed `VeyraError`s.
 iOS-only param: `bankName` (shown on the stored card). Android additionally requires
 `consumerIdentifier`, `bvn`, `accountHolderAddress`, `mobileNumber`.
 
-### 5.2 Activation
+### 6.2 Activation
 
 | Method | Notes |
 |---|---|
@@ -226,7 +226,7 @@ iOS-only param: `bankName` (shown on the stored card). Android additionally requ
 | `wallet.observeActivation(ref)` + `wallet.onActivationEvent(cb)` | polls every 10s for ≤5min; events `activated` / `timeout` / `error` |
 | `pause/resume/stopActivationObserver(ref)` | the timeout clock keeps running while paused |
 
-### 5.3 Cards & states
+### 6.3 Cards & states
 
 `wallet.getCards()` → `Card[]`. Render states in this precedence order:
 
@@ -239,7 +239,7 @@ iOS-only param: `bankName` (shown on the stored card). Android additionally requ
 `wallet.setActiveCard(card.id)` selects the card; on Android it also arms tap-to-pay
 (pay session required). `wallet.deactivateCard(ref)` removes it.
 
-### 5.4 Paying
+### 6.4 Paying
 
 | Rail | Methods | Platforms |
 |---|---|---|
@@ -253,7 +253,7 @@ returns `{ verified: false, reason }` (`MALFORMED` / `MISSING_SIGNATURE` /
 `UNKNOWN_KEY` / `BAD_SIGNATURE` / `EXPIRED`) — never show a confirm screen for it. The
 verified `handle` is single-use and never contains the payload.
 
-### 5.5 History & receipts
+### 6.5 History & receipts
 
 `getTransactions(ref, limit?)` (call `reconcilePendingTransactions()` first to settle
 PENDING rows), `processReceipt(qrPayload, expectedHash?)` to verify-and-store a scanned
@@ -262,14 +262,14 @@ merchant receipt, `getReceipts(limit?)`, `getReceiptForTransaction(hash)`.
 
 ## 7. Merchant (Get paid) API
 
-### 6.1 Registration & profile
+### 7.1 Registration & profile
 
 `merchant.register({ merchantType: 'PERSONAL' | 'BUSINESS', … })` (BVN for personal,
 CAC number for business), `getSettlementBanks()`, `isRegistered()`, `getStored()`,
 `refreshStatus()`, `activate()` / `deactivate()`, `update(…)`, `clearStored()` (local
 only). Gate acceptance on the stored merchant's status being `ACTIVE`.
 
-### 6.2 Tap acceptance
+### 7.2 Tap acceptance
 
 ```ts
 const { sessionId } = await merchant.tap.start({ amountMinorUnits });
@@ -287,7 +287,7 @@ Android-only; `ended` is iOS-only.
 issuer (incl. cancellation) · `'99'` pending — do **not** re-charge · `'91'` issuer
 unavailable · `'96'` ambiguous — check history before retrying.
 
-### 6.3 QR rails
+### 7.3 QR rails
 
 - **Get-paid QR (merchant-presented):** `createPaymentContext(amountMinorUnits,
   currency?)` → render `mpmPayload`; poll `contextStatus(txRef)`
@@ -297,7 +297,7 @@ unavailable · `'96'` ambiguous — check history before retrying.
   `{ handle, maskedCard, amountMinorUnits }` → confirm on screen →
   `chargeCustomerQr(handle, reference?)`.
 
-### 6.4 Transactions & receipts
+### 7.4 Transactions & receipts
 
 `getTransactions(limit?)`, `getTransaction(reference)`, `getReceipt(reference)` — the
 receipt carries `qrCodeBase64` (Android, ready-made PNG) **or** `qrPayload` (iOS,

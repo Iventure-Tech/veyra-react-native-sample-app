@@ -161,7 +161,6 @@ await Veyra.initialize({
     environment: 'TEST',
     clientId, clientSecret,
     paymentAppProviderId, tokenRequestorId,
-    deviceType: 'MOBILE',                  // Android (iOS auto-detects)
     allowedCountryCodes: ['0566'],
     recommendationStandardVersion: '1.0',  // Android (fixed on iOS)
     appleTeamId: 'YOURTEAMID',             // iOS

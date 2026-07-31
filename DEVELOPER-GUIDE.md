@@ -1,0 +1,284 @@
+# Veyra SDK for React Native — Developer Guide
+
+The canonical guide for integrating Veyra contactless payments in a React Native app via
+[`veyra-sdk-react-native`](https://www.npmjs.com/package/veyra-sdk-react-native). This
+sample app is the reference implementation of everything below.
+
+The React Native SDK wraps the same native SDKs the platform guides document — for
+deep-dives into payment semantics, response codes and per-outcome guidance, the
+[Android guide](https://github.com/Iventure-Tech/veyra-android-sample-app/blob/main/DEVELOPER-GUIDE.md)
+and [iOS guide](https://github.com/Iventure-Tech/veyra-ios-sample-app/blob/main/DEVELOPER-GUIDE.md)
+apply in full; this guide covers the React Native surface and what is different in a
+React Native app.
+
+---
+
+## 1. Requirements
+
+| | Android | iOS |
+|---|---|---|
+| OS floor | Android 9 (API 28) | iOS 15 |
+| React Native | 0.71+ (classic architecture, and new architecture via interop) | same |
+| Device | physical, NFC-capable | physical iPhone |
+| Extra | — | Apple Developer **Team ID** (App Attest) |
+
+Emulators/simulators cannot run NFC or device attestation.
+
+## 2. Install
+
+```sh
+npm install veyra-sdk-react-native
+```
+
+**Android** resolves the native SDK from the authenticated Veyra Maven repository. Put
+your repository credentials in `~/.gradle/gradle.properties` (or CI env
+`VEYRA_REPO_USERNAME` / `VEYRA_REPO_PASSWORD`):
+
+```properties
+veyraRepoUsername=…
+veyraRepoPassword=…
+```
+
+**iOS** downloads the prebuilt framework at `pod install`, using `~/.netrc`:
+
+```
+machine repo.veyra.co
+  login …
+  password …
+```
+
+### Manifest / Info.plist
+
+- **Android:** NFC/HCE permissions and the SDK's card-emulation service merge
+  automatically from the SDK's own manifests. Add only what your app itself needs —
+  this sample adds `CAMERA` (QR scanning) and location (payment device info). See
+  `android/app/src/main/AndroidManifest.xml`.
+- **iOS:** add `NFCReaderUsageDescription`, the ISO7816 select-identifier
+  `A000000891010104` (see `ios/VeyraBank/Info.plist`), and enable the **Near Field
+  Communication Tag Reading** capability on your target. Camera usage description for
+  QR scanning.
+
+## 3. Initialise
+
+```ts
+import Veyra from 'veyra-sdk-react-native';
+
+await Veyra.initialize({
+  softpos: { environment: 'TEST', clientId, clientSecret },
+  wallet: {
+    environment: 'TEST',
+    clientId, clientSecret,
+    paymentAppProviderId, tokenRequestorId,
+    deviceType: 'MOBILE',                  // Android (iOS auto-detects)
+    allowedCountryCodes: ['0566'],
+    recommendationStandardVersion: '1.0',  // Android (fixed on iOS)
+    appleTeamId: 'YOURTEAMID',             // iOS
+  },
+});
+```
+
+Call it once at app start (this sample does it in `App.tsx` before rendering
+navigation). It is idempotent and safe across native Activity recreation — the SDK
+re-attaches itself. All SDK failures reject with a typed `VeyraError` (§8).
+
+## 4. Sessions — how payment screens work in React Native
+
+**This is the one genuinely React-Native-specific concept.** The SDK arms the device
+(present as a card / read cards) only for the screen the user is actually on, and
+disarms it the moment they leave. Native apps get that from screen lifecycle; a React
+Native app's navigation is invisible to the native layer — so your payment screens
+declare themselves with a session hook:
+
+```tsx
+import { useIsFocused } from '@react-navigation/native';
+import { usePaySession, useGetPaidSession } from 'veyra-sdk-react-native';
+
+function PayScreen() {
+  usePaySession(useIsFocused());
+  // …cards, tap-to-pay, QR rails
+}
+
+function GetPaidScreen() {
+  useGetPaidSession(useIsFocused());
+  // …tap acceptance, QR rails
+}
+```
+
+Rules of the model:
+
+- **Mount the hook on the payment screen only.** Everywhere else the device is inert —
+  it does not present as a payment card and does not read cards.
+- **While the session screen is focused the device stays ready** — a customer queueing
+  at a terminal, or re-tapping after a decline, needs no re-arming.
+- **Leaving the screen disarms**: navigation away, back gesture, app background, screen
+  lock. Returning to the still-focused screen re-arms automatically.
+- **Tap APIs require their session** (`SESSION_REQUIRED` otherwise): `merchant.tap.*`
+  needs `useGetPaidSession`; `wallet.setActiveCard` (which arms Android tap-to-pay)
+  needs `usePaySession`. QR-only flows work without a session — they never arm NFC.
+- **A payment mid-flight is never interrupted** — if the user navigates away during
+  online authorisation, the SDK completes the payment first, then disarms.
+- The mode is observable (`Veyra.currentMode()` → `'NONE' | 'SOFTPOS' | 'WALLET'`) but
+  never settable — there is no mode API, by design.
+- Not on React Navigation? Pass any accurate "this screen is visible" boolean, or use
+  the imperative `sessions.open/close` — but the hooks are the recommended surface
+  because they cannot leak an open session.
+
+## 5. Wallet (Pay) API
+
+All methods return promises; all failures are typed `VeyraError`s.
+
+### 5.1 Add a card
+
+| Method | Notes |
+|---|---|
+| `wallet.getBanks(accountNumber?)` | issuer list for the picker |
+| `wallet.verifyAccount(params)` | eligibility pre-check |
+| `wallet.digitise(params)` | tokenise the account; `recommendation` is **your app's** risk decision — required, never defaulted |
+
+`digitise` resolves with `responseCode` `'APPROVED'` (ready), `'APPROVE_REQUIRE_AUTH'`
+(activation needed — `activationMethods` lists the OTP channels), or `'DECLINED'`.
+iOS-only param: `bankName` (shown on the stored card). Android additionally requires
+`consumerIdentifier`, `bvn`, `accountHolderAddress`, `mobileNumber`.
+
+### 5.2 Activation
+
+| Method | Notes |
+|---|---|
+| `wallet.requestActivationCode(ref, medium, contact?, reason?)` | iOS supports `MASKED_EMAIL` / `MASKED_MOBILE_PHONE` media |
+| `wallet.activate(ref, code)` | submit the OTP |
+| `wallet.checkTokenActive(ref)` | one-shot server check |
+| `wallet.observeActivation(ref)` + `wallet.onActivationEvent(cb)` | polls every 10s for ≤5min; events `activated` / `timeout` / `error` |
+| `pause/resume/stopActivationObserver(ref)` | the timeout clock keeps running while paused |
+
+### 5.3 Cards & states
+
+`wallet.getCards()` → `Card[]`. Render states in this precedence order:
+
+1. `requiresActivation` — offer the activation flow.
+2. `requiresOnline` — **grey the card out and disable pay affordances**; the SDK
+   restores it by itself once the device is online. Nothing to call.
+3. `!isActive` — blocked server-side (`status` e.g. `SUSPENDED`).
+4. Otherwise payable.
+
+`wallet.setActiveCard(card.id)` selects the card; on Android it also arms tap-to-pay
+(pay session required). `wallet.deactivateCard(ref)` removes it.
+
+### 5.4 Paying
+
+| Rail | Methods | Platforms |
+|---|---|---|
+| Tap-to-pay | arm via `setActiveCard`; outcomes on `wallet.onTapEvent` (`transactionStarted` / `transactionCompleted` / `activationFailed`) | **Android only** |
+| Scan-to-pay | `inspectScannedQr(payload)` → verified handle → `authenticateForPayment(…)` → `payScannedContext(handle)` | both |
+| Show-QR-to-pay | `authenticateForPayment(…)` → `showQrToPay(amountMinorUnits)`; expiry on `onQrExpired`; `cancelQrExpiry()` on teardown | both |
+
+Authentication is **fresh and single-use** per payment or QR render — call
+`authenticateForPayment` immediately before. A scanned QR that fails verification
+returns `{ verified: false, reason }` (`MALFORMED` / `MISSING_SIGNATURE` /
+`UNKNOWN_KEY` / `BAD_SIGNATURE` / `EXPIRED`) — never show a confirm screen for it. The
+verified `handle` is single-use and never contains the payload.
+
+### 5.5 History & receipts
+
+`getTransactions(ref, limit?)` (call `reconcilePendingTransactions()` first to settle
+PENDING rows), `processReceipt(qrPayload, expectedHash?)` to verify-and-store a scanned
+merchant receipt, `getReceipts(limit?)`, `getReceiptForTransaction(hash)`.
+`entryMethod` is `'TAP' | 'QR_GENERATED' | 'QR_SCANNED'`.
+
+## 6. Merchant (Get paid) API
+
+### 6.1 Registration & profile
+
+`merchant.register({ merchantType: 'PERSONAL' | 'BUSINESS', … })` (BVN for personal,
+CAC number for business), `getSettlementBanks()`, `isRegistered()`, `getStored()`,
+`refreshStatus()`, `activate()` / `deactivate()`, `update(…)`, `clearStored()` (local
+only). Gate acceptance on the stored merchant's status being `ACTIVE`.
+
+### 6.2 Tap acceptance
+
+```ts
+const { sessionId } = await merchant.tap.start({ amountMinorUnits });
+const sub = merchant.tap.onEvent((e) => { … });
+```
+
+Only `result` (and iOS `ended`) are terminal. `cardContactLost` / `unsupportedCard`
+mean the reader **stays armed for a re-tap** — show a transient hint ("Hold steady" /
+"Card not supported — try another card") and keep the waiting screen up, exactly like a
+physical terminal. `merchant.tap.cancel(sessionId)` cancels an armed, untapped payment.
+Progress events `readingComplete` / `sendingOnline` / `receivingOnline` are
+Android-only; `ended` is iOS-only.
+
+`result.responseCode`: `'00'` approved · `'05'` declined · `'06'` failed before the
+issuer (incl. cancellation) · `'99'` pending — do **not** re-charge · `'91'` issuer
+unavailable · `'96'` ambiguous — check history before retrying.
+
+### 6.3 QR rails
+
+- **Get-paid QR (merchant-presented):** `createPaymentContext(amountMinorUnits,
+  currency?)` → render `mpmPayload`; poll `contextStatus(txRef)`
+  (`PENDING → IN_FLIGHT → APPROVED/DECLINED/EXPIRED`); `cancelQrExpiry()` on teardown;
+  expiry event on `merchant.onQrExpired`.
+- **Charge a customer QR (consumer-presented):** `inspectCustomerQr(payload)` →
+  `{ handle, maskedCard, amountMinorUnits }` → confirm on screen →
+  `chargeCustomerQr(handle, reference?)`.
+
+### 6.4 Transactions & receipts
+
+`getTransactions(limit?)`, `getTransaction(reference)`, `getReceipt(reference)` — the
+receipt carries `qrCodeBase64` (Android, ready-made PNG) **or** `qrPayload` (iOS,
+render it yourself); display whichever is non-null (see
+`MerchantTransactionsScreen.tsx`).
+
+## 7. Events
+
+One `NativeEventEmitter` channel per family; subscribe via the typed helpers and
+`remove()` the subscription on unmount:
+
+| Helper | Events |
+|---|---|
+| `wallet.onActivationEvent` | `activated` / `timeout` / `error` |
+| `wallet.onTapEvent` (Android) | `transactionStarted` / `transactionCompleted` / `activationFailed` |
+| `merchant.tap.onEvent` | `cardDetected` / `cardContactLost` / `unsupportedCard` / progress / `ended` / `result` |
+| `wallet.onQrExpired` / `merchant.onQrExpired` | one `expired` per rendered QR |
+
+## 8. Errors
+
+Every rejection is a `VeyraError` with a stable `code` — never string-match messages:
+
+| Code | Meaning / action |
+|---|---|
+| `NOT_CONFIGURED` | call `Veyra.initialize` first |
+| `SESSION_REQUIRED` | mount `usePaySession` / `useGetPaidSession` on the payment screen |
+| `MODE_REFUSED` | the other experience's payment is mid-flight; retry after it completes |
+| `ONLINE_REQUIRED` | card needs the device online; grey it out, SDK self-heals |
+| `TOKEN_NOT_ACTIVE` | card blocked server-side |
+| `CDCVM_REQUIRED` | call `authenticateForPayment` first |
+| `AUTH_CANCELLED` / `AUTH_FAILED` | user backed out / failed device auth |
+| `NO_ACTIVE_CARD` / `CARD_CANNOT_SHOW_QR` | select a payable card / re-add a pre-QR card |
+| `UNSUPPORTED_ON_PLATFORM` | e.g. wallet tap-to-pay on iOS |
+| `VALIDATION` (`field`) | fix the named parameter |
+| `MISSING_MANDATORY_CONFIG` / `REQUEST_FAILED` / `UNKNOWN` | configuration / backend / other |
+
+## 9. Platform availability at a glance
+
+| Capability | Android | iOS |
+|---|---|---|
+| Wallet tap-to-pay (HCE) | ✅ | ❌ (Apple policy — pay by QR) |
+| Tap acceptance | ✅ | ✅ (NFC-capable iPhones) |
+| Scan-to-pay / Show-QR / history / receipts | ✅ | ✅ |
+| Merchant registration + QR rails | ✅ | ✅ |
+| Receipt QR | PNG (`qrCodeBase64`) | payload (`qrPayload`) |
+| `appleTeamId` | — | required |
+
+## 10. Troubleshooting
+
+- **`SESSION_REQUIRED` on a payment call** — the screen calling tap APIs must mount its
+  session hook and be focused. Check you pass `useIsFocused()` (not `true`).
+- **Android build can't resolve `co.veyra:*`** — repository credentials missing; see §2.
+- **iOS `pod install` fails downloading the framework** — `~/.netrc` missing or not
+  `chmod 600`.
+- **Device reads as "card not supported" at a terminal while your app is closed** —
+  expected: any NFC phone answers at protocol level; nothing is charged and no data is
+  read. Only your armed pay screen presents an actual card.
+- **Tap works on first launch, then stops after reload** — call `Veyra.initialize`
+  again on app start (this sample's `App.tsx` pattern); the SDK re-attaches to the
+  recreated native screen.

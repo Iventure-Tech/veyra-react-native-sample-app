@@ -30,8 +30,11 @@ Emulators/simulators cannot run NFC or device attestation.
 npm install veyra-sdk-react-native
 ```
 
-**Android** resolves the native SDK from the authenticated Veyra Maven repository. Put
-your repository credentials in `~/.gradle/gradle.properties` (or CI env
+**Android** resolves the native SDK from the authenticated Veyra Maven repository.
+Declare the repository in your app's `android/build.gradle` (this sample's shows the
+exact `allprojects` block — the app's own classpath pulls the `co.veyra:*` artifacts
+transitively, so the repository must be visible to it), and put your repository
+credentials in `~/.gradle/gradle.properties` (or CI env
 `VEYRA_REPO_USERNAME` / `VEYRA_REPO_PASSWORD`):
 
 ```properties

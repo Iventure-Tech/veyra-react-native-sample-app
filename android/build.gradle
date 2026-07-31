@@ -1,7 +1,7 @@
 buildscript {
     ext {
         buildToolsVersion = "34.0.0"
-        minSdkVersion = 23
+        minSdkVersion = 28 // Veyra SDK floor
         compileSdkVersion = 34
         targetSdkVersion = 34
         ndkVersion = "26.1.10909125"
@@ -19,3 +19,20 @@ buildscript {
 }
 
 apply plugin: "com.facebook.react.rootproject"
+
+// The Veyra SDK resolves from the authenticated Veyra Maven repository. Credentials come
+// from ~/.gradle/gradle.properties (veyraRepoUsername/veyraRepoPassword) or CI env vars —
+// see the developer guide. Declared for all projects: the app's own classpath pulls the
+// co.veyra:* artifacts transitively through the wrapper.
+allprojects {
+    repositories {
+        maven {
+            name = "veyra"
+            url = "https://repo.veyra.co/releases"
+            credentials {
+                username = findProperty("veyraRepoUsername") ?: System.getenv("VEYRA_REPO_USERNAME") ?: ""
+                password = findProperty("veyraRepoPassword") ?: System.getenv("VEYRA_REPO_PASSWORD") ?: ""
+            }
+        }
+    }
+}

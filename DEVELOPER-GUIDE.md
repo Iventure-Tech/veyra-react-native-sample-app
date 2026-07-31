@@ -18,11 +18,18 @@ React Native app.
 | | Android | iOS |
 |---|---|---|
 | OS floor | Android 9 (API 28) | iOS 15 |
-| React Native | 0.71+ (classic architecture, and new architecture via interop) | same |
+| React Native | **0.80+** out of the box; 0.79 with a Kotlin override (see below) | same |
 | Device | physical, NFC-capable | physical iPhone |
 | Extra | — | Apple Developer **Team ID** (App Attest) |
 
 Emulators/simulators cannot run NFC or device attestation.
+
+> **Android Kotlin floor:** the Veyra SDK is compiled with Kotlin 2.2, which your app's
+> Kotlin compiler must be able to read: React Native 0.80+ (Kotlin 2.1 by default) works
+> unmodified; on 0.79 set `kotlinVersion = "2.1.21"` (and pin the
+> `org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion` classpath) in
+> `android/build.gradle`. Earlier React Native versions cannot read the SDK's metadata
+> — their Gradle plugin is incompatible with Kotlin 2.1+.
 
 ## 2. Install
 
@@ -97,13 +104,18 @@ cp veyra.config.example.ts veyra.config.ts
 3. On the phone: enable **Developer options** (Settings → About phone → tap *Build
    number* seven times), then turn on **USB debugging**. Plug the phone in over USB and
    accept the "Allow USB debugging?" prompt. `adb devices` should list it.
-4. Build, install and start Metro in one step:
+4. Run with **two terminals** — Metro (the JS dev server) in one, the build in the other:
 
    ```bash
+   # terminal 1 — leave running
+   npm start
+
+   # terminal 2 — build + install on the phone
    npm run android
    ```
 
-   JS-only edits hot-reload from then on; rebuild only when native dependencies change.
+   JS-only edits hot-reload through Metro from then on; rebuild only when native
+   dependencies change.
 
 ### iOS
 
@@ -124,7 +136,8 @@ cp veyra.config.example.ts veyra.config.ts
 2. Open `ios/VeyraBank.xcworkspace` in Xcode. On the **VeyraBank** target → *Signing &
    Capabilities*: select your team, and add the **Near Field Communication Tag
    Reading** capability (required for tap acceptance).
-3. Select your iPhone as the run destination and press Run — or:
+3. Start Metro in one terminal (`npm start`, leave it running), then in another select
+   your iPhone as the run destination in Xcode and press Run — or:
 
    ```bash
    npm run ios -- --device

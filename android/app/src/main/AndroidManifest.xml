@@ -1,8 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!-- NFC/HCE permissions, features and the SDK's card-emulation service are merged
-         automatically from the Veyra SDK's own manifests — nothing to add for them.
-         Reader mode needs no NFC intent filters either (tags arrive via callback). -->
+         automatically from the Veyra SDK's own manifests — nothing to add for them. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
     <!-- QR scanning (scan-to-pay, charge-customer-QR) -->

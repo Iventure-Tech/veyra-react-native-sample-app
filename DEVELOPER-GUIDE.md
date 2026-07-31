@@ -84,10 +84,17 @@ cp veyra.config.example.ts veyra.config.ts
    veyraRepoPassword=your-repo-password
    ```
 
-2. On the phone: enable **Developer options** (Settings → About phone → tap *Build
+2. Point Gradle at your Android SDK if you have not before — create `android/local.properties`:
+
+   ```properties
+   sdk.dir=/Users/you/Library/Android/sdk
+   ```
+
+   (Android Studio usually creates this on first project open.)
+3. On the phone: enable **Developer options** (Settings → About phone → tap *Build
    number* seven times), then turn on **USB debugging**. Plug the phone in over USB and
    accept the "Allow USB debugging?" prompt. `adb devices` should list it.
-3. Build, install and start Metro in one step:
+4. Build, install and start Metro in one step:
 
    ```bash
    npm run android

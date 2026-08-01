@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Camera, CameraType } from 'react-native-camera-kit';
 import {
   wallet,
   usePaySession,
@@ -10,6 +9,7 @@ import {
   type ScanInspection,
 } from 'veyra-sdk-react-native';
 import type { RootStackParamList } from '../../App';
+import { Scanner } from '../Scanner';
 import { theme } from '../theme';
 import { Button, formatAmount, Section } from '../ui';
 
@@ -66,16 +66,7 @@ export function ScanToPayScreen({
     );
   }
 
-  return (
-    <Camera
-      style={styles.camera}
-      cameraType={CameraType.Back}
-      scanBarcode
-      onReadCode={(event: { nativeEvent: { codeStringValue: string } }) =>
-        onScan(event.nativeEvent.codeStringValue)
-      }
-    />
-  );
+  return <Scanner onCode={onScan} onCancel={() => navigation.goBack()} />;
 }
 
 const styles = StyleSheet.create({

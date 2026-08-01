@@ -1,8 +1,8 @@
 import React, { useCallback, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { Camera, CameraType } from 'react-native-camera-kit';
 import { wallet, VeyraError, type TransactionReceipt } from 'veyra-sdk-react-native';
+import { Scanner } from '../Scanner';
 import { theme } from '../theme';
 import { Busy, Button, Section } from '../ui';
 
@@ -41,19 +41,7 @@ export function WalletReceiptsScreen(): React.JSX.Element {
   };
 
   if (scanning) {
-    return (
-      <View style={styles.scanner}>
-        <Camera
-          style={styles.scanner}
-          cameraType={CameraType.Back}
-          scanBarcode
-          onReadCode={(event: { nativeEvent: { codeStringValue: string } }) =>
-            onScan(event.nativeEvent.codeStringValue)
-          }
-        />
-        <Button title="Cancel" onPress={() => setScanning(false)} />
-      </View>
-    );
+    return <Scanner onCode={onScan} onCancel={() => setScanning(false)} />;
   }
 
   if (detail) return <ReceiptDetail receipt={detail} onBack={() => setDetail(null)} />;

@@ -2,7 +2,6 @@ import React, { useCallback, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Camera, CameraType } from 'react-native-camera-kit';
 import {
   wallet,
   VeyraError,
@@ -11,6 +10,7 @@ import {
 } from 'veyra-sdk-react-native';
 import type { RootStackParamList } from '../../App';
 import { theme } from '../theme';
+import { Scanner } from '../Scanner';
 import { ReceiptDetail } from './WalletReceiptsScreen';
 import { Busy, Button, formatAmount } from '../ui';
 
@@ -66,19 +66,7 @@ export function WalletTransactionsScreen({
   };
 
   if (scanningFor) {
-    return (
-      <View style={styles.scanner}>
-        <Camera
-          style={styles.scanner}
-          cameraType={CameraType.Back}
-          scanBarcode
-          onReadCode={(event: { nativeEvent: { codeStringValue: string } }) =>
-            onScanReceipt(event.nativeEvent.codeStringValue)
-          }
-        />
-        <Button title="Cancel" onPress={() => setScanningFor(null)} />
-      </View>
-    );
+    return <Scanner onCode={onScanReceipt} onCancel={() => setScanningFor(null)} />;
   }
 
   if (receipt) return <ReceiptDetail receipt={receipt} onBack={() => setReceipt(null)} />;

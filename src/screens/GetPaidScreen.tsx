@@ -3,7 +3,6 @@ import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import QRCode from 'react-native-qrcode-svg';
-import { Camera, CameraType } from 'react-native-camera-kit';
 import {
   merchant,
   useGetPaidSession,
@@ -13,6 +12,7 @@ import {
   type ScannedCustomerQr,
 } from 'veyra-sdk-react-native';
 import type { RootStackParamList } from '../../App';
+import { Scanner } from '../Scanner';
 import { theme } from '../theme';
 import { QrTile, Busy, Button, Field, formatAmount, Section } from '../ui';
 
@@ -211,19 +211,7 @@ export function GetPaidScreen({
   }
 
   if (rail === 'cpmScan') {
-    return (
-      <View style={styles.scanner}>
-        <Camera
-          style={styles.scanner}
-          cameraType={CameraType.Back}
-          scanBarcode
-          onReadCode={(event: { nativeEvent: { codeStringValue: string } }) =>
-            onCpmScan(event.nativeEvent.codeStringValue)
-          }
-        />
-        <Button title="Cancel" onPress={() => setRail('idle')} />
-      </View>
-    );
+    return <Scanner onCode={onCpmScan} onCancel={() => setRail('idle')} />;
   }
 
   return (

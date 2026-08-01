@@ -1,7 +1,9 @@
 import React, { useCallback, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import QRCode from 'react-native-qrcode-svg';
+import type { RootStackParamList } from '../../App';
 import {
   merchant,
   type MerchantReceipt,
@@ -10,14 +12,20 @@ import {
 import { theme } from '../theme';
 import { QrTile, Busy, Button, formatAmount, Section } from '../ui';
 
-export function MerchantTransactionsScreen(): React.JSX.Element {
+export function MerchantTransactionsScreen({
+  route,
+}: NativeStackScreenProps<RootStackParamList, 'MerchantTransactions'>): React.JSX.Element {
   const [rows, setRows] = useState<MerchantTransaction[] | null>(null);
   const [receipt, setReceipt] = useState<MerchantReceipt | null>(null);
+
+  const openReceiptFor = route.params?.openReceiptFor;
 
   useFocusEffect(
     useCallback(() => {
       merchant.getTransactions(50).then(setRows).catch(() => setRows([]));
-    }, [])
+      if (openReceiptFor) showReceipt(openReceiptFor);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [openReceiptFor])
   );
 
   const showReceipt = async (reference: string) => {

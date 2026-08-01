@@ -1,17 +1,19 @@
 import React, { useCallback, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { wallet, type TransactionSummary } from 'veyra-sdk-react-native';
+import { wallet, type TransactionReceipt, type TransactionSummary } from 'veyra-sdk-react-native';
 import type { RootStackParamList } from '../../App';
 import { theme } from '../theme';
-import { Busy, formatAmount } from '../ui';
+import { ReceiptDetail } from './WalletReceiptsScreen';
+import { Busy, Button, formatAmount } from '../ui';
 
 export function WalletTransactionsScreen({
   route,
 }: NativeStackScreenProps<RootStackParamList, 'WalletTransactions'>): React.JSX.Element {
   const { tokenUniqueReference } = route.params;
   const [rows, setRows] = useState<TransactionSummary[] | null>(null);
+  const [receipt, setReceipt] = useState<TransactionReceipt | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -25,6 +27,7 @@ export function WalletTransactionsScreen({
     }, [tokenUniqueReference])
   );
 
+  if (receipt) return <ReceiptDetail receipt={receipt} onBack={() => setReceipt(null)} />;
   if (rows === null) return <Busy label="Loading transactions…" />;
   if (rows.length === 0) {
     return (
@@ -47,6 +50,16 @@ export function WalletTransactionsScreen({
             {t.localTransactionDateTime ?? ''}
           </Text>
           {t.merchantLocation ? <Text style={styles.meta}>{t.merchantLocation}</Text> : null}
+          {t.transactionHash ? (
+            <Button
+              title="Receipt"
+              onPress={async () => {
+                const r = await wallet.getReceiptForTransaction(t.transactionHash!).catch(() => null);
+                if (r) setReceipt(r);
+                else Alert.alert('No receipt stored', 'Scan the merchant receipt QR to keep one.');
+              }}
+            />
+          ) : null}
         </View>
       ))}
     </ScrollView>

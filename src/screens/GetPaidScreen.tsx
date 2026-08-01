@@ -36,6 +36,7 @@ export function GetPaidScreen({
   const [mpmQr, setMpmQr] = useState<PaymentContextQr | null>(null);
   const [mpmState, setMpmState] = useState<string | null>(null);
   const [cpm, setCpm] = useState<ScannedCustomerQr | null>(null);
+  const [lastApprovedRef, setLastApprovedRef] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -66,6 +67,9 @@ export function GetPaidScreen({
           setRail('idle');
           setTapSessionId(null);
           setHint(null);
+          if (e.result.status === 'APPROVED' && e.result.merchantTransactionReference) {
+            setLastApprovedRef(e.result.merchantTransactionReference);
+          }
           Alert.alert(
             e.result.status ?? 'Result',
             `${e.result.responseCode ?? ''} ${e.result.message ?? ''}`.trim()
@@ -144,6 +148,9 @@ export function GetPaidScreen({
     setRail('idle');
     try {
       const outcome = await merchant.chargeCustomerQr(cpm.handle);
+      if (outcome.approved && outcome.merchantTransactionReference) {
+        setLastApprovedRef(outcome.merchantTransactionReference);
+      }
       Alert.alert(outcome.approved ? 'Approved' : 'Declined', outcome.responseCode ?? '');
     } catch (e) {
       Alert.alert('Charge failed', (e as VeyraError).message);
@@ -185,6 +192,15 @@ export function GetPaidScreen({
       <Section title="Amount">
         <Field label="Amount (NGN)" value={amount} onChangeText={setAmount} keyboardType="numeric" />
       </Section>
+
+      {rail === 'idle' && lastApprovedRef && (
+        <Section title="Payment approved">
+          <Button
+            title="Show receipt QR"
+            onPress={() => navigation.navigate('MerchantTransactions', { openReceiptFor: lastApprovedRef })}
+          />
+        </Section>
+      )}
 
       {rail === 'idle' && (
         <Section title="Accept a payment">

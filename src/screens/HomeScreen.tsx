@@ -30,6 +30,7 @@ export function HomeScreen({
       <Section title="Get paid (merchant)">
         <Button title="Accept payments" onPress={() => navigation.navigate('GetPaid')} />
         <Button title="Merchant transactions" onPress={() => navigation.navigate('MerchantTransactions')} />
+        <Button title="Merchant settings" onPress={() => navigation.navigate('MerchantSettings')} />
       </Section>
       <Section title="Pay (wallet)">
         <Button title="My cards & pay" onPress={() => navigation.navigate('Pay')} />

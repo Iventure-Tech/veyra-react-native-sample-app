@@ -102,6 +102,7 @@ export function PayScreen({
       <Section title="Actions">
         <Button title="Add card" onPress={() => navigation.navigate('AddCard')} />
         <Button title="Scan to pay" onPress={() => navigation.navigate('ScanToPay')} />
+        <Button title="Receipts" onPress={() => navigation.navigate('WalletReceipts')} />
       </Section>
     </ScrollView>
   );

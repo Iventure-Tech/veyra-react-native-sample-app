@@ -13,6 +13,8 @@ import { AddCardScreen } from './src/screens/AddCardScreen';
 import { ScanToPayScreen } from './src/screens/ScanToPayScreen';
 import { ShowToPayScreen } from './src/screens/ShowToPayScreen';
 import { WalletTransactionsScreen } from './src/screens/WalletTransactionsScreen';
+import { WalletReceiptsScreen } from './src/screens/WalletReceiptsScreen';
+import { MerchantSettingsScreen } from './src/screens/MerchantSettingsScreen';
 import { theme } from './src/theme';
 
 // Veyra Bank neo-bank theme (matches the native samples: black + crimson accent).
@@ -33,12 +35,14 @@ export type RootStackParamList = {
   Home: undefined;
   GetPaid: undefined;
   RegisterMerchant: undefined;
-  MerchantTransactions: undefined;
+  MerchantTransactions: { openReceiptFor?: string } | undefined;
+  MerchantSettings: undefined;
   Pay: undefined;
   AddCard: undefined;
   ScanToPay: undefined;
   ShowToPay: { cardId: string };
   WalletTransactions: { tokenUniqueReference: string };
+  WalletReceipts: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -77,11 +81,13 @@ export default function App(): React.JSX.Element {
         <Stack.Screen name="GetPaid" component={GetPaidScreen} options={{ title: 'Get paid' }} />
         <Stack.Screen name="RegisterMerchant" component={RegisterMerchantScreen} options={{ title: 'Register merchant' }} />
         <Stack.Screen name="MerchantTransactions" component={MerchantTransactionsScreen} options={{ title: 'Merchant transactions' }} />
+        <Stack.Screen name="MerchantSettings" component={MerchantSettingsScreen} options={{ title: 'Merchant settings' }} />
         <Stack.Screen name="Pay" component={PayScreen} options={{ title: 'Pay' }} />
         <Stack.Screen name="AddCard" component={AddCardScreen} options={{ title: 'Add card' }} />
         <Stack.Screen name="ScanToPay" component={ScanToPayScreen} options={{ title: 'Scan to pay' }} />
         <Stack.Screen name="ShowToPay" component={ShowToPayScreen} options={{ title: 'Show QR to pay' }} />
         <Stack.Screen name="WalletTransactions" component={WalletTransactionsScreen} options={{ title: 'Transactions' }} />
+        <Stack.Screen name="WalletReceipts" component={WalletReceiptsScreen} options={{ title: 'Receipts' }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

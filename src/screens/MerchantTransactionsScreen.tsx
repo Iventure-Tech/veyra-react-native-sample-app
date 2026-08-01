@@ -16,6 +16,7 @@ export function MerchantTransactionsScreen({
   route,
 }: NativeStackScreenProps<RootStackParamList, 'MerchantTransactions'>): React.JSX.Element {
   const [rows, setRows] = useState<MerchantTransaction[] | null>(null);
+  const [detail, setDetail] = useState<MerchantTransaction | null>(null);
   const [receipt, setReceipt] = useState<MerchantReceipt | null>(null);
 
   const openReceiptFor = route.params?.openReceiptFor;
@@ -32,6 +33,37 @@ export function MerchantTransactionsScreen({
     const r = await merchant.getReceipt(reference).catch(() => null);
     if (r) setReceipt(r);
   };
+
+  if (detail) {
+    const fields: Array<[string, string | null]> = [
+      ['Reference', detail.merchantTransactionReference],
+      ['Rail', detail.rail],
+      ['Amount', formatAmount(detail.amountMinorUnits)],
+      ['Status', detail.status],
+      ['Response code', detail.responseCode],
+      ['Time', detail.transactionTime],
+      ['Transaction id', detail.transactionId],
+      ['Card', detail.maskedTokenLast4],
+    ];
+    return (
+      <ScrollView contentContainerStyle={styles.container}>
+        <View style={styles.row}>
+          {fields
+            .filter(([, v]) => !!v)
+            .map(([k, v]) => (
+              <View key={k} style={styles.rowTop}>
+                <Text style={styles.meta}>{k}</Text>
+                <Text style={styles.ref}>{v}</Text>
+              </View>
+            ))}
+          {detail.status === 'APPROVED' && (
+            <Button title="Receipt QR" onPress={() => { showReceipt(detail.merchantTransactionReference); setDetail(null); }} />
+          )}
+          <Button title="Back" destructive onPress={() => setDetail(null)} />
+        </View>
+      </ScrollView>
+    );
+  }
 
   if (rows === null) return <Busy label="Loading transactions…" />;
 
@@ -71,6 +103,7 @@ export function MerchantTransactionsScreen({
             <Text style={styles.amount}>{formatAmount(t.amountMinorUnits)}</Text>
           </View>
           <Text style={styles.meta}>{t.transactionTime ?? ''}</Text>
+          <Button title="Details" onPress={() => setDetail(t)} />
           {t.status === 'APPROVED' && (
             <Button title="Receipt QR" onPress={() => showReceipt(t.merchantTransactionReference)} />
           )}

@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
   wallet,
@@ -11,18 +11,23 @@ import { SAMPLE_ACCOUNT } from '../../veyra.config';
 import { theme } from '../theme';
 import { Busy, Button, Field, Section } from '../ui';
 
-type Step = 'form' | 'digitising' | 'chooseMethod' | 'enterCode' | 'waiting';
+type Step = 'form' | 'banks' | 'digitising' | 'chooseMethod' | 'enterCode' | 'waiting';
 
-/** Add card: digitise → request activation code → activate (or observe). */
+/**
+ * Add card: eligibility pre-check → digitise → request activation code → activate
+ * (or observe). The bank picker fills the institution code from the issuer list.
+ */
 export function AddCardScreen({
   navigation,
 }: NativeStackScreenProps<RootStackParamList, 'AddCard'>): React.JSX.Element {
   const [step, setStep] = useState<Step>('form');
   const [banks, setBanks] = useState<Bank[]>([]);
+  const [bankName, setBankName] = useState<string | null>(null);
   const [form, setForm] = useState({ ...SAMPLE_ACCOUNT, walletAccountId: 'wallet-user-1' });
   const [tokenRef, setTokenRef] = useState<string | null>(null);
   const [methods, setMethods] = useState<ActivationMethodInfo[]>([]);
   const [code, setCode] = useState('');
+  const observedRef = useRef<string | null>(null);
 
   useEffect(() => {
     wallet.getBanks().then(setBanks).catch(() => {});
@@ -40,10 +45,39 @@ export function AddCardScreen({
     return () => sub.remove();
   }, [tokenRef, navigation]);
 
+  // The activation observer must not outlive this screen.
+  useEffect(
+    () => () => {
+      if (observedRef.current) {
+        wallet.stopActivationObserver(observedRef.current).catch(() => {});
+      }
+    },
+    []
+  );
+
+  const pickBank = (bank: Bank) => {
+    setForm({ ...form, institutionCode: bank.institutionCode });
+    setBankName(bank.name);
+    setStep('form');
+  };
+
   const digitise = async () => {
     setStep('digitising');
     try {
-      const bank = banks.find((b) => b.institutionCode === form.institutionCode);
+      // Eligibility pre-check: a declined account never reaches digitise.
+      const eligibility = await wallet.verifyAccount({
+        accountNumber: form.accountNumber,
+        institutionCode: form.institutionCode,
+        walletAccountId: form.walletAccountId,
+        accountHolderName: form.accountHolderName,
+        accountNumberSource: 'MANUAL',
+      });
+      if (!eligibility.isApproved) {
+        Alert.alert('Account not eligible', eligibility.message ?? eligibility.responseCode ?? 'Declined');
+        setStep('form');
+        return;
+      }
+
       const result = await wallet.digitise({
         accountNumber: form.accountNumber,
         institutionCode: form.institutionCode,
@@ -56,7 +90,7 @@ export function AddCardScreen({
         accountHolderAddress: form.accountHolderAddress,
         mobileNumber: form.mobileNumber,
         accountNumberSource: 'MANUAL',
-        bankName: bank?.name,
+        bankName: bankName ?? banks.find((b) => b.institutionCode === form.institutionCode)?.name,
       });
       if (!result.isApproved && !result.requiresActivation) {
         Alert.alert('Declined', result.message ?? result.responseCode ?? 'Declined');
@@ -82,6 +116,7 @@ export function AddCardScreen({
     try {
       await wallet.requestActivationCode(tokenRef, method.medium, method.contact);
       await wallet.observeActivation(tokenRef);
+      observedRef.current = tokenRef;
       setStep('enterCode');
     } catch (e) {
       Alert.alert('Could not send code', (e as Error).message);
@@ -108,10 +143,26 @@ export function AddCardScreen({
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
+      {step === 'banks' && (
+        <Section title="Choose your bank">
+          {banks.length === 0 && <Busy label="Loading banks…" />}
+          {banks.map((b) => (
+            <Pressable key={b.institutionCode} style={styles.bankRow} onPress={() => pickBank(b)}>
+              <Text style={styles.bankName}>{b.name}</Text>
+              <Text style={styles.bankCode}>{b.institutionCode}</Text>
+            </Pressable>
+          ))}
+          <Button title="Cancel" destructive onPress={() => setStep('form')} />
+        </Section>
+      )}
+
       {step === 'form' && (
         <Section title="Account details">
           <Field label="Account number" value={form.accountNumber} onChangeText={(v) => setForm({ ...form, accountNumber: v })} keyboardType="numeric" />
-          <Field label="Institution code" value={form.institutionCode} onChangeText={(v) => setForm({ ...form, institutionCode: v })} keyboardType="numeric" />
+          <Button
+            title={bankName ? `Bank: ${bankName} (${form.institutionCode})` : `Choose bank (${form.institutionCode || 'not set'})`}
+            onPress={() => setStep('banks')}
+          />
           <Field label="Account holder name" value={form.accountHolderName} onChangeText={(v) => setForm({ ...form, accountHolderName: v })} />
           <Field label="BVN" value={form.bvn} onChangeText={(v) => setForm({ ...form, bvn: v })} keyboardType="numeric" />
           <Field label="Mobile number" value={form.mobileNumber} onChangeText={(v) => setForm({ ...form, mobileNumber: v })} keyboardType="phone-pad" />
@@ -121,7 +172,7 @@ export function AddCardScreen({
         </Section>
       )}
 
-      {step === 'digitising' && <Busy label="Adding your card…" />}
+      {step === 'digitising' && <Busy label="Checking eligibility and adding your card…" />}
 
       {step === 'chooseMethod' && (
         <Section title="Verify it's you">
@@ -147,4 +198,13 @@ export function AddCardScreen({
 const styles = StyleSheet.create({
   container: { padding: 16 },
   body: { color: theme.textPrimary },
+  bankRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.bankHairline,
+  },
+  bankName: { color: theme.textPrimary, flexShrink: 1 },
+  bankCode: { color: theme.textSecondary },
 });

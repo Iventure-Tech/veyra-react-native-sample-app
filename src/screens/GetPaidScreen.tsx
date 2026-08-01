@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useIsFocused } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import QRCode from 'react-native-qrcode-svg';
 import { Camera, CameraType } from 'react-native-camera-kit';
@@ -29,19 +29,31 @@ export function GetPaidScreen({
   useGetPaidSession(useIsFocused());
 
   const [registered, setRegistered] = useState<boolean | null>(null);
+  // Backend status gate: payments are refused unless the merchant is ACTIVE (a
+  // merchant with no status yet counts active, matching the native samples).
+  const [merchantStatus, setMerchantStatus] = useState<string | null>(null);
   const [amount, setAmount] = useState('1000');
   const [rail, setRail] = useState<Rail>('idle');
   const [hint, setHint] = useState<string | null>(null);
   const [tapSessionId, setTapSessionId] = useState<string | null>(null);
   const [mpmQr, setMpmQr] = useState<PaymentContextQr | null>(null);
   const [mpmState, setMpmState] = useState<string | null>(null);
+  const [mpmExpired, setMpmExpired] = useState(false);
   const [cpm, setCpm] = useState<ScannedCustomerQr | null>(null);
   const [lastApprovedRef, setLastApprovedRef] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  useEffect(() => {
-    merchant.isRegistered().then(setRegistered).catch(() => setRegistered(false));
-  }, []);
+  const active = merchantStatus === null || merchantStatus === 'ACTIVE';
+
+  useFocusEffect(
+    useCallback(() => {
+      merchant.isRegistered().then(setRegistered).catch(() => setRegistered(false));
+      merchant
+        .getStored()
+        .then((m) => setMerchantStatus(m?.merchantStatus ?? null))
+        .catch(() => {});
+    }, [])
+  );
 
   // Tap events: transient hints keep the waiting screen up; only `result` is terminal.
   useEffect(() => {
@@ -82,13 +94,33 @@ export function GetPaidScreen({
     return () => sub.remove();
   }, []);
 
+  // An expired get-paid QR must stop being shown — it is no longer chargeable.
+  useEffect(() => {
+    const sub = merchant.onQrExpired(() => {
+      setMpmExpired(true);
+      setMpmState('EXPIRED');
+      if (pollRef.current) clearInterval(pollRef.current);
+    });
+    return () => sub.remove();
+  }, []);
+
   useEffect(() => () => {
     if (pollRef.current) clearInterval(pollRef.current);
   }, []);
 
   const minorUnits = Math.round(Number(amount) * 100);
 
+  const requireActive = (): boolean => {
+    if (active) return true;
+    Alert.alert(
+      'Merchant not active',
+      `This merchant is ${merchantStatus} — payments are refused. Activate it from Merchant settings.`
+    );
+    return false;
+  };
+
   const startTap = async () => {
+    if (!requireActive()) return;
     try {
       const { sessionId } = await merchant.tap.start({ amountMinorUnits: minorUnits });
       setTapSessionId(sessionId);
@@ -106,17 +138,21 @@ export function GetPaidScreen({
   };
 
   const showMpmQr = async () => {
+    if (!requireActive()) return;
     try {
       const qr = await merchant.createPaymentContext(minorUnits);
       setMpmQr(qr);
       setMpmState('PENDING');
+      setMpmExpired(false);
       setRail('mpm');
       pollRef.current = setInterval(async () => {
         const status = await merchant.contextStatus(qr.txRef).catch(() => null);
         if (!status) return;
         setMpmState(status.state);
+        if (status.state === 'EXPIRED') setMpmExpired(true);
         if (status.isSettled || status.state === 'EXPIRED') {
           if (pollRef.current) clearInterval(pollRef.current);
+          if (status.isApproved) setLastApprovedRef(qr.txRef);
           Alert.alert(status.state, status.responseCode ?? '');
         }
       }, 2000);
@@ -129,6 +165,7 @@ export function GetPaidScreen({
     if (pollRef.current) clearInterval(pollRef.current);
     await merchant.cancelQrExpiry().catch(() => {});
     setMpmQr(null);
+    setMpmExpired(false);
     setRail('idle');
   };
 
@@ -138,13 +175,15 @@ export function GetPaidScreen({
       setCpm(scanned);
       setRail('cpmConfirm');
     } catch (e) {
-      Alert.alert('Invalid payment QR', (e as VeyraError).message);
-      setRail('idle');
+      // Not a payment QR: hint and stay armed — the scanner keeps running so the
+      // merchant can just aim at the right code (mirror of the native samples).
+      Alert.alert('Not a payment QR', (e as VeyraError).message);
     }
   };
 
   const chargeCpm = async () => {
     if (!cpm) return;
+    if (!requireActive()) return;
     setRail('idle');
     try {
       const outcome = await merchant.chargeCustomerQr(cpm.handle);
@@ -189,6 +228,15 @@ export function GetPaidScreen({
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
+      {!active && (
+        <View style={styles.inactiveBanner}>
+          <Text style={styles.inactiveText}>
+            Merchant {merchantStatus} — payments are refused until it is active.
+          </Text>
+          <Button title="Merchant settings" onPress={() => navigation.navigate('MerchantSettings')} />
+        </View>
+      )}
+
       <Section title="Amount">
         <Field label="Amount (NGN)" value={amount} onChangeText={setAmount} keyboardType="numeric" />
       </Section>
@@ -220,10 +268,18 @@ export function GetPaidScreen({
       {rail === 'mpm' && mpmQr && (
         <Section title={`Payment QR — ${formatAmount(minorUnits)} (${mpmState})`}>
           <View style={styles.qr}>
-            <QrTile>
-              <QRCode value={mpmQr.mpmPayload} size={240} />
-            </QrTile>
+            {mpmExpired ? (
+              // Same-size placeholder: an expired QR must never remain scannable.
+              <View style={styles.expiredTile}>
+                <Text style={styles.expiredText}>Code expired</Text>
+              </View>
+            ) : (
+              <QrTile>
+                <QRCode value={mpmQr.mpmPayload} size={240} />
+              </QrTile>
+            )}
           </View>
+          {mpmExpired && <Button title="Show a new code" onPress={showMpmQr} />}
           <Button title="Done" onPress={closeMpm} />
         </Section>
       )}
@@ -246,4 +302,23 @@ const styles = StyleSheet.create({
   scanner: { flex: 1 },
   qr: { alignItems: 'center', marginVertical: 12 },
   body: { color: theme.textPrimary },
+  inactiveBanner: {
+    backgroundColor: theme.accentRedDark,
+    borderRadius: 10,
+    padding: 12,
+    marginVertical: 8,
+  },
+  inactiveText: { color: theme.textPrimary, marginBottom: 6 },
+  expiredTile: {
+    width: 272,
+    height: 272,
+    borderRadius: 12,
+    backgroundColor: theme.bankSurface,
+    borderColor: theme.bankHairline,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+  },
+  expiredText: { color: theme.textSecondary },
 });

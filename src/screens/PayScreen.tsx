@@ -49,6 +49,24 @@ export function PayScreen({
     return () => sub.remove();
   }, []);
 
+  const removeCard = (card: Card) => {
+    Alert.alert('Remove this card?', 'The token is deactivated on the backend and removed from this device.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await wallet.deactivateCard(card.tokenUniqueReference ?? card.id);
+            reload();
+          } catch (e) {
+            Alert.alert('Could not remove card', (e as Error).message);
+          }
+        },
+      },
+    ]);
+  };
+
   const selectCard = async (card: Card) => {
     try {
       // Android: arms tap-to-pay for this card (needs the pay session — mounted above).
@@ -93,6 +111,7 @@ export function PayScreen({
             {!blocked && (
               <Button title="Show QR to pay" onPress={() => navigation.navigate('ShowToPay', { cardId: card.id })} />
             )}
+            <Button title="Remove card" destructive onPress={() => removeCard(card)} />
           </View>
         );
       })}

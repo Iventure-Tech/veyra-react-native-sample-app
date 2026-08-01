@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, ScrollView, StyleSheet } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { Pressable } from 'react-native';
 import { merchant, type Bank, type MerchantType } from 'veyra-sdk-react-native';
+import { theme } from '../theme';
 import type { RootStackParamList } from '../../App';
 import { SAMPLE_ACCOUNT } from '../../veyra.config';
 import { Button, Field, Section } from '../ui';
@@ -10,6 +12,8 @@ export function RegisterMerchantScreen({
   navigation,
 }: NativeStackScreenProps<RootStackParamList, 'RegisterMerchant'>): React.JSX.Element {
   const [banks, setBanks] = useState<Bank[]>([]);
+  const [pickingBank, setPickingBank] = useState(false);
+  const [bankName, setBankName] = useState<string | null>(null);
   const [merchantType, setMerchantType] = useState<MerchantType>('PERSONAL');
   // Prefilled from the onboarding-pack sample data (merchant name = account holder,
   // matching the native samples) — edit veyra.config.ts to change the prefill.
@@ -87,9 +91,26 @@ export function RegisterMerchantScreen({
           <Field label="CAC number" value={form.cacNumber} onChangeText={set('cacNumber')} />
         )}
       </Section>
-      <Section title={`Settlement account${banks.length ? ` (${banks.length} banks)` : ''}`}>
+      <Section title="Settlement account">
         <Field label="Account number" value={form.accountNumber} onChangeText={set('accountNumber')} keyboardType="numeric" />
-        <Field label="Institution code" value={form.institutionCode} onChangeText={set('institutionCode')} keyboardType="numeric" />
+        <Button
+          title={bankName ? `Bank: ${bankName} (${form.institutionCode})` : `Choose bank (${form.institutionCode || 'not set'})`}
+          onPress={() => setPickingBank(true)}
+        />
+        {pickingBank &&
+          banks.map((b) => (
+            <Pressable
+              key={b.institutionCode}
+              style={styles.bankRow}
+              onPress={() => {
+                setForm({ ...form, institutionCode: b.institutionCode });
+                setBankName(b.name);
+                setPickingBank(false);
+              }}>
+              <Text style={styles.bankName}>{b.name}</Text>
+              <Text style={styles.bankCode}>{b.institutionCode}</Text>
+            </Pressable>
+          ))}
         <Field label="Acquirer id" value={form.acquirerId} onChangeText={set('acquirerId')} />
         <Button title="Register" onPress={register} />
       </Section>
@@ -97,4 +118,15 @@ export function RegisterMerchantScreen({
   );
 }
 
-const styles = StyleSheet.create({ container: { padding: 16 } });
+const styles = StyleSheet.create({
+  container: { padding: 16 },
+  bankRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.bankHairline,
+  },
+  bankName: { color: theme.textPrimary, flexShrink: 1 },
+  bankCode: { color: theme.textSecondary },
+});

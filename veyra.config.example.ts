@@ -23,7 +23,7 @@ export const VEYRA_CONFIG: VeyraConfig = {
   },
 };
 
-/** Test account prefill for the add-card form (from your onboarding pack). */
+/** Test prefill for the add-card and register-merchant forms (from your onboarding pack). */
 export const SAMPLE_ACCOUNT = {
   accountNumber: '0123456789',
   institutionCode: '000013',
@@ -32,4 +32,10 @@ export const SAMPLE_ACCOUNT = {
   mobileNumber: '+2348000000000',
   emailAddress: 'test@example.com',
   accountHolderAddress: '1 Test Street, Lagos',
+  // Merchant registration prefill (merchant name = account holder, like the native samples).
+  acquirerId: 'ACQ001',
+  addressLine1: '20 Campbell Street',
+  city: 'Lagos',
+  state: 'Lagos',
+  cacNumber: 'RC-0000000',
 };

@@ -3,6 +3,7 @@ import { Alert, ScrollView, StyleSheet } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { merchant, type Bank, type MerchantType } from 'veyra-sdk-react-native';
 import type { RootStackParamList } from '../../App';
+import { SAMPLE_ACCOUNT } from '../../veyra.config';
 import { Button, Field, Section } from '../ui';
 
 export function RegisterMerchantScreen({
@@ -10,19 +11,21 @@ export function RegisterMerchantScreen({
 }: NativeStackScreenProps<RootStackParamList, 'RegisterMerchant'>): React.JSX.Element {
   const [banks, setBanks] = useState<Bank[]>([]);
   const [merchantType, setMerchantType] = useState<MerchantType>('PERSONAL');
+  // Prefilled from the onboarding-pack sample data (merchant name = account holder,
+  // matching the native samples) — edit veyra.config.ts to change the prefill.
   const [form, setForm] = useState({
-    merchantName: '',
-    emailAddress: '',
-    phoneNumber: '',
-    addressLine1: '',
-    city: '',
-    state: '',
+    merchantName: SAMPLE_ACCOUNT.accountHolderName,
+    emailAddress: SAMPLE_ACCOUNT.emailAddress,
+    phoneNumber: SAMPLE_ACCOUNT.mobileNumber,
+    addressLine1: SAMPLE_ACCOUNT.addressLine1,
+    city: SAMPLE_ACCOUNT.city,
+    state: SAMPLE_ACCOUNT.state,
     countryCode: '0566',
-    accountNumber: '',
-    institutionCode: '',
-    acquirerId: '',
-    bvn: '',
-    cacNumber: '',
+    accountNumber: SAMPLE_ACCOUNT.accountNumber,
+    institutionCode: SAMPLE_ACCOUNT.institutionCode,
+    acquirerId: SAMPLE_ACCOUNT.acquirerId,
+    bvn: SAMPLE_ACCOUNT.bvn,
+    cacNumber: SAMPLE_ACCOUNT.cacNumber,
   });
 
   useEffect(() => {

@@ -9,6 +9,7 @@ import {
   type WalletTapEvent,
 } from 'veyra-sdk-react-native';
 import type { RootStackParamList } from '../../App';
+import { theme } from '../theme';
 import { Busy, Button, formatAmount, Section } from '../ui';
 
 /**
@@ -64,7 +65,7 @@ export function PayScreen({
     <ScrollView contentContainerStyle={styles.container}>
       {cards.length === 0 && (
         <Section title="No cards yet">
-          <Text>Add your bank account as a contactless card.</Text>
+          <Text style={styles.body}>Add your bank account as a contactless card.</Text>
         </Section>
       )}
       {cards.map((card) => {
@@ -109,14 +110,15 @@ export function PayScreen({
 const styles = StyleSheet.create({
   container: { padding: 16 },
   card: {
-    backgroundColor: '#12315e',
+    backgroundColor: theme.bankCardRed,
     borderRadius: 12,
     padding: 16,
     marginVertical: 8,
   },
-  cardActive: { borderWidth: 2, borderColor: '#7fd18a' },
+  cardActive: { borderWidth: 2, borderColor: theme.successGreen },
   cardBlocked: { opacity: 0.5 },
-  cardPan: { color: 'white', fontSize: 18, letterSpacing: 2 },
-  cardMeta: { color: '#bcd', marginTop: 4, marginBottom: 8 },
-  cardNote: { color: '#ffd37f', marginBottom: 6 },
+  cardPan: { color: theme.textPrimary, fontSize: 18, letterSpacing: 2 },
+  cardMeta: { color: theme.textSecondary, marginTop: 4, marginBottom: 8 },
+  cardNote: { color: theme.warningOrange, marginBottom: 6 },
+  body: { color: theme.textSecondary },
 });

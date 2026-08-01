@@ -13,7 +13,8 @@ import {
   type ScannedCustomerQr,
 } from 'veyra-sdk-react-native';
 import type { RootStackParamList } from '../../App';
-import { Busy, Button, Field, formatAmount, Section } from '../ui';
+import { theme } from '../theme';
+import { QrTile, Busy, Button, Field, formatAmount, Section } from '../ui';
 
 type Rail = 'idle' | 'tap' | 'mpm' | 'cpmScan' | 'cpmConfirm';
 
@@ -156,7 +157,7 @@ export function GetPaidScreen({
     return (
       <View style={styles.container}>
         <Section title="No merchant yet">
-          <Text>Register a merchant to start accepting payments.</Text>
+          <Text style={styles.body}>Register a merchant to start accepting payments.</Text>
           <Button title="Register" onPress={() => navigation.navigate('RegisterMerchant')} />
         </Section>
       </View>
@@ -203,7 +204,9 @@ export function GetPaidScreen({
       {rail === 'mpm' && mpmQr && (
         <Section title={`Payment QR — ${formatAmount(minorUnits)} (${mpmState})`}>
           <View style={styles.qr}>
-            <QRCode value={mpmQr.mpmPayload} size={240} />
+            <QrTile>
+              <QRCode value={mpmQr.mpmPayload} size={240} />
+            </QrTile>
           </View>
           <Button title="Done" onPress={closeMpm} />
         </Section>
@@ -211,7 +214,7 @@ export function GetPaidScreen({
 
       {rail === 'cpmConfirm' && cpm && (
         <Section title="Confirm charge">
-          <Text>
+          <Text style={styles.body}>
             {cpm.maskedCard} — {formatAmount(cpm.amountMinorUnits)}
           </Text>
           <Button title="Charge" onPress={chargeCpm} />
@@ -226,4 +229,5 @@ const styles = StyleSheet.create({
   container: { padding: 16 },
   scanner: { flex: 1 },
   qr: { alignItems: 'center', marginVertical: 12 },
+  body: { color: theme.textPrimary },
 });

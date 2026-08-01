@@ -10,6 +10,7 @@ import {
   type ScanInspection,
 } from 'veyra-sdk-react-native';
 import type { RootStackParamList } from '../../App';
+import { theme } from '../theme';
 import { Button, formatAmount, Section } from '../ui';
 
 /** Scan a merchant's payment QR: inspect → authenticate (fresh, single-use) → pay. */
@@ -56,7 +57,7 @@ export function ScanToPayScreen({
       <View style={styles.container}>
         <Section title="Confirm payment">
           <Text style={styles.merchant}>{inspection.merchantName}</Text>
-          {inspection.merchantCity ? <Text>{inspection.merchantCity}</Text> : null}
+          {inspection.merchantCity ? <Text style={styles.city}>{inspection.merchantCity}</Text> : null}
           <Text style={styles.amount}>{formatAmount(inspection.amountMinorUnits)}</Text>
           <Button title={busy ? 'Paying…' : 'Pay'} onPress={pay} disabled={busy} />
           <Button title="Cancel" destructive onPress={() => navigation.goBack()} disabled={busy} />
@@ -80,6 +81,7 @@ export function ScanToPayScreen({
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 16 },
   camera: { flex: 1 },
-  merchant: { fontSize: 18, fontWeight: '700' },
-  amount: { fontSize: 28, fontWeight: '700', marginVertical: 12 },
+  merchant: { fontSize: 18, fontWeight: '700', color: theme.textPrimary },
+  city: { color: theme.textSecondary },
+  amount: { fontSize: 28, fontWeight: '700', marginVertical: 12, color: theme.textPrimary },
 });

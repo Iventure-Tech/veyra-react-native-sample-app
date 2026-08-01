@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
+import { StatusBar, StyleSheet, Text, View } from 'react-native';
+import { DarkTheme, NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import Veyra from 'veyra-sdk-react-native';
 import { VEYRA_CONFIG } from './veyra.config';
@@ -13,6 +13,21 @@ import { AddCardScreen } from './src/screens/AddCardScreen';
 import { ScanToPayScreen } from './src/screens/ScanToPayScreen';
 import { ShowToPayScreen } from './src/screens/ShowToPayScreen';
 import { WalletTransactionsScreen } from './src/screens/WalletTransactionsScreen';
+import { theme } from './src/theme';
+
+// Veyra Bank neo-bank theme (matches the native samples: black + crimson accent).
+const navTheme = {
+  ...DarkTheme,
+  colors: {
+    ...DarkTheme.colors,
+    primary: theme.accentRed,
+    background: theme.bankBg,
+    card: theme.bankBg,
+    text: theme.textPrimary,
+    border: theme.bankHairline,
+    notification: theme.accentRed,
+  },
+};
 
 export type RootStackParamList = {
   Home: undefined;
@@ -42,20 +57,21 @@ export default function App(): React.JSX.Element {
     return (
       <View style={styles.center}>
         <Text style={styles.error}>SDK initialisation failed</Text>
-        <Text>{error}</Text>
+        <Text style={styles.errorDetail}>{error}</Text>
       </View>
     );
   }
   if (!ready) {
     return (
       <View style={styles.center}>
-        <Text>Starting Veyra…</Text>
+        <Text style={styles.errorDetail}>Starting Veyra…</Text>
       </View>
     );
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer theme={navTheme}>
+      <StatusBar barStyle="light-content" backgroundColor={theme.bankBg} />
       <Stack.Navigator initialRouteName="Home">
         <Stack.Screen name="Home" component={HomeScreen} options={{ title: 'Veyra Bank' }} />
         <Stack.Screen name="GetPaid" component={GetPaidScreen} options={{ title: 'Get paid' }} />
@@ -72,6 +88,13 @@ export default function App(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  error: { fontWeight: 'bold', marginBottom: 8 },
+  center: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+    backgroundColor: theme.bankBg,
+  },
+  error: { fontWeight: 'bold', marginBottom: 8, color: theme.errorRed },
+  errorDetail: { color: theme.textSecondary, textAlign: 'center' },
 });

@@ -7,6 +7,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { theme } from './theme';
 
 export function Button(props: {
   title: string;
@@ -43,6 +44,7 @@ export function Field(props: {
         onChangeText={props.onChangeText}
         keyboardType={props.keyboardType ?? 'default'}
         autoCapitalize="none"
+        placeholderTextColor={theme.textSecondary}
       />
     </View>
   );
@@ -63,10 +65,15 @@ export function Section(props: {
 export function Busy(props: { label: string }): React.JSX.Element {
   return (
     <View style={styles.busy}>
-      <ActivityIndicator />
+      <ActivityIndicator color={theme.accentRed} />
       <Text style={styles.busyLabel}>{props.label}</Text>
     </View>
   );
+}
+
+/** White tile behind QR codes — they must stay scannable on the black theme. */
+export function QrTile(props: { children: React.ReactNode }): React.JSX.Element {
+  return <View style={styles.qrTile}>{props.children}</View>;
 }
 
 export function formatAmount(minorUnits: number): string {
@@ -75,32 +82,42 @@ export function formatAmount(minorUnits: number): string {
 
 const styles = StyleSheet.create({
   button: {
-    backgroundColor: '#1a4fd6',
+    backgroundColor: theme.accentRed,
     borderRadius: 8,
     paddingVertical: 12,
     paddingHorizontal: 16,
     alignItems: 'center',
     marginVertical: 6,
   },
-  buttonDestructive: { backgroundColor: '#b3261e' },
+  buttonDestructive: { backgroundColor: theme.accentRedDark },
   buttonDim: { opacity: 0.5 },
-  buttonText: { color: 'white', fontWeight: '600' },
+  buttonText: { color: theme.textPrimary, fontWeight: '600' },
   field: { marginVertical: 6 },
-  fieldLabel: { fontSize: 12, color: '#555', marginBottom: 2 },
+  fieldLabel: { fontSize: 12, color: theme.textSecondary, marginBottom: 2 },
   fieldInput: {
     borderWidth: 1,
-    borderColor: '#ccc',
+    borderColor: theme.bankHairline,
     borderRadius: 6,
     paddingHorizontal: 10,
     paddingVertical: 8,
+    color: theme.textPrimary,
+    backgroundColor: theme.bankCardDark,
   },
   section: {
-    backgroundColor: 'white',
+    backgroundColor: theme.bankSurface,
+    borderColor: theme.bankHairline,
+    borderWidth: 1,
     borderRadius: 10,
     padding: 14,
     marginVertical: 8,
   },
-  sectionTitle: { fontWeight: '700', marginBottom: 8 },
+  sectionTitle: { fontWeight: '700', marginBottom: 8, color: theme.textPrimary },
   busy: { flexDirection: 'row', alignItems: 'center', gap: 8, marginVertical: 8 },
-  busyLabel: { color: '#555' },
+  busyLabel: { color: theme.textSecondary },
+  qrTile: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 16,
+    alignSelf: 'center',
+  },
 });

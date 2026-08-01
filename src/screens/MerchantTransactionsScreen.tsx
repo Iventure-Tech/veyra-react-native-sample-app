@@ -7,7 +7,8 @@ import {
   type MerchantReceipt,
   type MerchantTransaction,
 } from 'veyra-sdk-react-native';
-import { Busy, Button, formatAmount, Section } from '../ui';
+import { theme } from '../theme';
+import { QrTile, Busy, Button, formatAmount, Section } from '../ui';
 
 export function MerchantTransactionsScreen(): React.JSX.Element {
   const [rows, setRows] = useState<MerchantTransaction[] | null>(null);
@@ -30,7 +31,7 @@ export function MerchantTransactionsScreen(): React.JSX.Element {
     return (
       <ScrollView contentContainerStyle={styles.container}>
         <Section title={`Receipt — ${receipt.totalAmountFormatted}`}>
-          <Text>{receipt.merchantName}</Text>
+          <Text style={styles.ref}>{receipt.merchantName}</Text>
           <Text style={styles.meta}>{receipt.merchantTransactionReference}</Text>
           <View style={styles.qr}>
             {/* Android supplies a rendered PNG; iOS supplies the payload to render. */}
@@ -40,7 +41,9 @@ export function MerchantTransactionsScreen(): React.JSX.Element {
                 source={{ uri: `data:image/png;base64,${receipt.qrCodeBase64}` }}
               />
             ) : receipt.qrPayload ? (
-              <QRCode value={receipt.qrPayload} size={240} />
+              <QrTile>
+                <QRCode value={receipt.qrPayload} size={240} />
+              </QrTile>
             ) : null}
           </View>
           <Text style={styles.meta}>The customer scans this to store the receipt.</Text>
@@ -71,11 +74,18 @@ export function MerchantTransactionsScreen(): React.JSX.Element {
 
 const styles = StyleSheet.create({
   container: { padding: 16 },
-  row: { backgroundColor: 'white', borderRadius: 10, padding: 12, marginVertical: 6 },
+  row: {
+    backgroundColor: theme.bankSurface,
+    borderColor: theme.bankHairline,
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 12,
+    marginVertical: 6,
+  },
   rowTop: { flexDirection: 'row', justifyContent: 'space-between' },
-  ref: { fontWeight: '600' },
-  amount: { fontWeight: '700' },
-  meta: { color: '#666', fontSize: 12, marginTop: 4 },
+  ref: { fontWeight: '600', color: theme.textPrimary },
+  amount: { fontWeight: '700', color: theme.textPrimary },
+  meta: { color: theme.textSecondary, fontSize: 12, marginTop: 4 },
   qr: { alignItems: 'center', marginVertical: 12 },
   qrImage: { width: 240, height: 240 },
 });

@@ -4,6 +4,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import Veyra, { type VeyraMode } from 'veyra-sdk-react-native';
 import type { RootStackParamList } from '../../App';
+import { theme } from '../theme';
 import { Button, Section } from '../ui';
 
 /**
@@ -40,5 +41,5 @@ export function HomeScreen({
 
 const styles = StyleSheet.create({
   container: { padding: 16 },
-  mode: { textAlign: 'center', color: '#777', marginTop: 16 },
+  mode: { textAlign: 'center', color: theme.textSecondary, marginTop: 16 },
 });

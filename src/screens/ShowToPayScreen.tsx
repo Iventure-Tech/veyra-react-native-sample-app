@@ -5,7 +5,8 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import QRCode from 'react-native-qrcode-svg';
 import { wallet, usePaySession, type PaymentQr } from 'veyra-sdk-react-native';
 import type { RootStackParamList } from '../../App';
-import { Busy, Button, formatAmount, Field, Section } from '../ui';
+import { theme } from '../theme';
+import { QrTile, Busy, Button, formatAmount, Field, Section } from '../ui';
 
 /** Show a payment QR for the active card (consumer-presented / CPM). */
 export function ShowToPayScreen({
@@ -62,7 +63,9 @@ export function ShowToPayScreen({
           </>
         ) : (
           <View style={styles.qr}>
-            <QRCode value={qr.payload} size={260} />
+            <QrTile>
+              <QRCode value={qr.payload} size={260} />
+            </QrTile>
             <Busy label="Waiting for the merchant to scan…" />
           </View>
         )}
@@ -75,5 +78,5 @@ export function ShowToPayScreen({
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 16 },
   qr: { alignItems: 'center', marginVertical: 12 },
-  expired: { color: '#b3261e', marginVertical: 12, textAlign: 'center' },
+  expired: { color: theme.errorRed, marginVertical: 12, textAlign: 'center' },
 });

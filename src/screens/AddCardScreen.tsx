@@ -8,6 +8,7 @@ import {
 } from 'veyra-sdk-react-native';
 import type { RootStackParamList } from '../../App';
 import { SAMPLE_ACCOUNT } from '../../veyra.config';
+import { theme } from '../theme';
 import { Busy, Button, Field, Section } from '../ui';
 
 type Step = 'form' | 'digitising' | 'chooseMethod' | 'enterCode' | 'waiting';
@@ -124,7 +125,7 @@ export function AddCardScreen({
 
       {step === 'chooseMethod' && (
         <Section title="Verify it's you">
-          <Text>Where should we send your activation code?</Text>
+          <Text style={styles.body}>Where should we send your activation code?</Text>
           {methods.map((m) => (
             <Button key={m.medium} title={`${m.medium} ${m.contact ?? ''}`} onPress={() => requestCode(m)} />
           ))}
@@ -143,4 +144,7 @@ export function AddCardScreen({
   );
 }
 
-const styles = StyleSheet.create({ container: { padding: 16 } });
+const styles = StyleSheet.create({
+  container: { padding: 16 },
+  body: { color: theme.textPrimary },
+});

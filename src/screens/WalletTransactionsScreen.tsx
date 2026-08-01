@@ -4,6 +4,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { wallet, type TransactionSummary } from 'veyra-sdk-react-native';
 import type { RootStackParamList } from '../../App';
+import { theme } from '../theme';
 import { Busy, formatAmount } from '../ui';
 
 export function WalletTransactionsScreen({
@@ -28,7 +29,7 @@ export function WalletTransactionsScreen({
   if (rows.length === 0) {
     return (
       <View style={styles.empty}>
-        <Text>No transactions yet.</Text>
+        <Text style={styles.meta}>No transactions yet.</Text>
       </View>
     );
   }
@@ -55,9 +56,16 @@ export function WalletTransactionsScreen({
 const styles = StyleSheet.create({
   container: { padding: 16 },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  row: { backgroundColor: 'white', borderRadius: 10, padding: 12, marginVertical: 6 },
+  row: {
+    backgroundColor: theme.bankSurface,
+    borderColor: theme.bankHairline,
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 12,
+    marginVertical: 6,
+  },
   rowTop: { flexDirection: 'row', justifyContent: 'space-between' },
-  merchant: { fontWeight: '600' },
-  amount: { fontWeight: '700' },
-  meta: { color: '#666', fontSize: 12, marginTop: 4 },
+  merchant: { fontWeight: '600', color: theme.textPrimary },
+  amount: { fontWeight: '700', color: theme.textPrimary },
+  meta: { color: theme.textSecondary, fontSize: 12, marginTop: 4 },
 });

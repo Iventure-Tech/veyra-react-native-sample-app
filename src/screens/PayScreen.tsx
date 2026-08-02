@@ -16,6 +16,11 @@ import { Busy, Button, formatAmount, Section } from '../ui';
  * The wallet screen. `usePaySession` keeps tap-to-pay armed only while this screen is
  * focused; selecting a card (Android) arms it for tapping. Cards with
  * `requiresOnline` are greyed out — the SDK restores them by itself.
+ *
+ * `setActiveCard` is what arms a card for this app run: it is how the SDK learns which card
+ * a tap should use and where the tap callbacks are delivered. Storage remembering the card
+ * from a previous run is not the same thing, so the screen re-arms the remembered card on
+ * every focus rather than only when the user picks a different one.
  */
 export function PayScreen({
   navigation,
@@ -25,6 +30,7 @@ export function PayScreen({
 
   const [cards, setCards] = useState<Card[] | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [armedId, setArmedId] = useState<string | null>(null);
   const [tapStatus, setTapStatus] = useState<string | null>(null);
 
   const reload = useCallback(() => {
@@ -33,6 +39,21 @@ export function PayScreen({
   }, []);
 
   useFocusEffect(reload);
+
+  // Re-arm the remembered card whenever this screen becomes the payment screen. Runs after
+  // usePaySession above, so the pay session setActiveCard requires is already open.
+  useEffect(() => {
+    if (!focused || !activeId || activeId === armedId) return;
+    wallet
+      .setActiveCard(activeId)
+      .then(() => setArmedId(activeId))
+      .catch(() => {});
+  }, [focused, activeId, armedId]);
+
+  // A blurred screen is disarmed by the SDK — arm again on the next focus.
+  useEffect(() => {
+    if (!focused) setArmedId(null);
+  }, [focused]);
 
   useEffect(() => {
     const sub = wallet.onTapEvent((e: WalletTapEvent) => {
@@ -72,6 +93,7 @@ export function PayScreen({
       // Android: arms tap-to-pay for this card (needs the pay session — mounted above).
       await wallet.setActiveCard(card.id);
       setActiveId(card.id);
+      setArmedId(card.id);
     } catch (e) {
       Alert.alert('Cannot select card', (e as Error).message);
     }

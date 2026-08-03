@@ -307,6 +307,12 @@ Android-only; `ended` is iOS-only.
 issuer (incl. cancellation) · `'99'` pending — do **not** re-charge · `'91'` issuer
 unavailable · `'96'` ambiguous — check history before retrying.
 
+**You never handle NFC intents.** The SDK arms and disarms Android reader mode itself for
+the duration of a get-paid session, so cards are read while your screen is open without any
+NFC intent filter in the manifest and without forwarding intents from `onNewIntent` — there
+is nothing to wire on the React Native side. Declaring a tag intent filter would only pull
+taps toward your launcher activity and away from the session.
+
 ### 7.3 QR rails
 
 - **Get-paid QR (merchant-presented):** `createPaymentContext(amountMinorUnits,

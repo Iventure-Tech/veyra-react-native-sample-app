@@ -346,6 +346,11 @@ receipt carries `qrCodeBase64` (Android, ready-made PNG) **or** `qrPayload` (iOS
 render it yourself); display whichever is non-null (see
 `MerchantTransactionsScreen.tsx`).
 
+A `MerchantTransaction` also carries `cardholderName` — the paying card's name as it
+presented it (EMV tag `5F20`); on a Veyra token that is the card's display name, e.g.
+`AFRIGO ****1234`, not a person's name. It is `null` on QR-MPM payments (the merchant
+never reads the card) and on transactions recorded by older SDK versions.
+
 ## 8. Events
 
 One `NativeEventEmitter` channel per family; subscribe via the typed helpers and

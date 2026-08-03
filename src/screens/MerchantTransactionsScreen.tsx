@@ -37,13 +37,18 @@ export function MerchantTransactionsScreen({
   if (detail) {
     const fields: Array<[string, string | null]> = [
       ['Reference', detail.merchantTransactionReference],
-      ['Rail', detail.rail],
+      // Which rail took the payment (Tap / QR / Scan) — the SDK derives the wording, so this
+      // reads the same as on Android and iOS. A QR payment must never show as a tap.
+      ['Paid via', detail.railLabel],
       ['Amount', formatAmount(detail.amountMinorUnits)],
       ['Status', detail.status],
       ['Response code', detail.responseCode],
       ['Time', detail.transactionTime],
       ['Transaction id', detail.transactionId],
       ['Card', detail.maskedTokenLast4],
+      // EMV tag 5F20 as the card presented it — a Veyra token shows its display name,
+      // e.g. "AFRIGO ****1234". Null on QR-MPM, where the merchant never reads the card.
+      ['Cardholder', detail.cardholderName],
     ];
     return (
       <ScrollView contentContainerStyle={styles.container}>
@@ -73,6 +78,10 @@ export function MerchantTransactionsScreen({
         <Section title={`Receipt — ${receipt.totalAmountFormatted}`}>
           <Text style={styles.ref}>{receipt.merchantName}</Text>
           <Text style={styles.meta}>{receipt.merchantTransactionReference}</Text>
+          {/* The paying card as it presented itself (EMV 5F20) — merchant's copy only. */}
+          {!!receipt.cardholderName && (
+            <Text style={styles.meta}>{receipt.cardholderName}</Text>
+          )}
           <View style={styles.qr}>
             {/* Android supplies a rendered PNG; iOS supplies the payload to render. */}
             {receipt.qrCodeBase64 ? (
@@ -99,7 +108,7 @@ export function MerchantTransactionsScreen({
       {rows.map((t) => (
         <View key={t.merchantTransactionReference} style={styles.row}>
           <View style={styles.rowTop}>
-            <Text style={styles.ref}>{t.rail ?? 'TAP'} · {t.status}</Text>
+            <Text style={styles.ref}>{t.railLabel} · {t.status}</Text>
             <Text style={styles.amount}>{formatAmount(t.amountMinorUnits)}</Text>
           </View>
           <Text style={styles.meta}>{t.transactionTime ?? ''}</Text>

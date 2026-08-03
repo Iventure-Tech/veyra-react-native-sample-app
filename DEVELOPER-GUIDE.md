@@ -241,6 +241,11 @@ iOS-only param: `bankName` (shown on the stored card). Android additionally requ
 | `wallet.observeActivation(ref)` + `wallet.onActivationEvent(cb)` | polls every 10s for ≤5min; events `activated` / `timeout` / `error` |
 | `pause/resume/stopActivationObserver(ref)` | the timeout clock keeps running while paused |
 
+An observer polls, so tie its life to the screen that shows the card: observe every card with
+`requiresActivation`, pause on blur and resume on focus, and stop on unmount. Re-observing a token
+replaces its observer rather than adding a second one — but it also restarts the 5-minute clock, so
+track what you already observe instead of re-issuing on every render. See `PayScreen.tsx`.
+
 ### 6.3 Cards & states
 
 `wallet.getCards()` → `Card[]`. Render states in this precedence order:

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useIsFocused, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -21,6 +21,11 @@ import { Busy, Button, formatAmount, Section } from '../ui';
  * a tap should use and where the tap callbacks are delivered. Storage remembering the card
  * from a previous run is not the same thing, so the screen re-arms the remembered card on
  * every focus rather than only when the user picks a different one.
+ *
+ * The screen also watches every card still awaiting activation, so one activated out of band
+ * (call centre, issuer app) turns tappable here without the user reloading. Those observers
+ * poll, so they follow the screen: paused when it blurs, resumed on focus, stopped when it
+ * unmounts.
  */
 export function PayScreen({
   navigation,
@@ -54,6 +59,62 @@ export function PayScreen({
   useEffect(() => {
     if (!focused) setArmedId(null);
   }, [focused]);
+
+  // ── Activation observers ────────────────────────────────────────────────────
+  // One per card still awaiting activation. Held in a ref (not state) because the
+  // pause/resume/stop effects must act on the current set without re-running when it changes.
+  const observed = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!cards) return;
+    const pending = new Set(
+      cards.filter((c) => c.requiresActivation).map((c) => c.tokenUniqueReference ?? c.id)
+    );
+    for (const ref of observed.current) {
+      if (!pending.has(ref)) {
+        observed.current.delete(ref);
+        wallet.stopActivationObserver(ref).catch(() => {});
+      }
+    }
+    for (const ref of pending) {
+      if (observed.current.has(ref)) continue;
+      observed.current.add(ref);
+      wallet.observeActivation(ref).catch(() => observed.current.delete(ref));
+    }
+  }, [cards]);
+
+  useEffect(() => {
+    const sub = wallet.onActivationEvent((e) => {
+      if (!observed.current.has(e.tokenUniqueReference)) return;
+      if (e.event === 'activated') {
+        observed.current.delete(e.tokenUniqueReference);
+        reload(); // the card is tappable now — refresh so it stops rendering as pending
+      }
+      if (e.event === 'timeout' || e.event === 'error') {
+        observed.current.delete(e.tokenUniqueReference);
+      }
+    });
+    return () => sub.remove();
+  }, [reload]);
+
+  // Polling follows the screen. The SDK keeps the 5-minute timeout clock running while
+  // paused, so a card activated during the pause is still picked up on the next resume.
+  useEffect(() => {
+    observed.current.forEach((ref) => {
+      const call = focused ? wallet.resumeActivationObserver(ref) : wallet.pauseActivationObserver(ref);
+      call.catch(() => {});
+    });
+  }, [focused]);
+
+  useEffect(
+    () => () => {
+      observed.current.forEach((ref) => {
+        wallet.stopActivationObserver(ref).catch(() => {});
+      });
+      observed.current.clear();
+    },
+    []
+  );
 
   useEffect(() => {
     const sub = wallet.onTapEvent((e: WalletTapEvent) => {

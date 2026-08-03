@@ -394,6 +394,11 @@ Every rejection is a `VeyraError` with a stable `code` — never string-match me
 - **Android build can't resolve `co.veyra:*`** — repository credentials missing; see §2.
 - **iOS `pod install` fails downloading the framework** — `~/.netrc` missing or not
   `chmod 600`.
+- **iOS build fails in the `fmt` pod with "call to consteval function … is not a constant
+  expression"** — not a Veyra failure: React Native 0.80–0.82 vendor {fmt} 11.0.2, whose
+  compile-time format-string checking the clang in Xcode 26 rejects (fixed upstream in fmt
+  11.1, which React Native picks up in 0.83). Either build with an earlier Xcode, move to
+  React Native 0.83+, or copy the `post_install` patch this sample carries in `ios/Podfile`.
 - **Device reads as "card not supported" at a terminal while your app is closed** —
   expected: any NFC phone answers at protocol level; nothing is charged and no data is
   read. Only your armed pay screen presents an actual card.

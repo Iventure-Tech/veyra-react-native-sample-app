@@ -8,6 +8,58 @@ require Pod::Executable.execute_command('node', ['-p',
 platform :ios, min_ios_version_supported
 prepare_react_native_project!
 
+# React Native 0.80–0.82 vendor {fmt} 11.0.2, whose compile-time format-string checking uses
+# `consteval` in a way the clang shipped with Xcode 26 rejects ("call to consteval function …
+# is not a constant expression", in fmt/format-inl.h). It is fixed upstream in fmt 11.1, which
+# React Native only picks up in 0.83, so on this React Native the pod cannot be built as-is.
+#
+# fmt 11.0.2 decides `FMT_USE_CONSTEVAL` from its own feature detection with no escape hatch,
+# so a `-DFMT_USE_CONSTEVAL=0` build setting is simply overwritten by the header (both
+# `FMT_CONSTEVAL=` and `FMT_USE_CONSTEVAL=0` were tried and neither has any effect). The one
+# thing that works is turning the detection off in the header itself. Only fmt's *compile-time*
+# format-string validation is lost — the runtime checks and the API are unchanged, and nothing
+# else in the dependency graph is touched.
+#
+# Delete this whole block once the app moves to a React Native that vendors fmt >= 11.1.
+def veyra_patch_fmt_consteval(installer)
+  fmt = installer.pod_targets.find { |target| target.name == 'fmt' }
+  return if fmt.nil?
+
+  if Gem::Version.new(fmt.root_spec.version.to_s) >= Gem::Version.new('11.1')
+    Pod::UI.puts "fmt #{fmt.root_spec.version} builds on current Xcode — the consteval patch in the Podfile can go.".green
+    return
+  end
+
+  header = File.join(installer.sandbox.pod_dir('fmt'), 'include', 'fmt', 'base.h')
+  unless File.exist?(header)
+    Pod::UI.warn "Could not find #{header} — the fmt consteval patch was not applied; the build will fail on Xcode 26+."
+    return
+  end
+
+  source = File.read(header)
+  marker = '#if 1 || !defined(__cpp_lib_is_constant_evaluated)'
+  return if source.include?(marker) # already patched (pod install re-runs this every time)
+
+  anchor = '#if !defined(__cpp_lib_is_constant_evaluated)'
+  unless source.include?(anchor)
+    Pod::UI.warn "fmt #{fmt.root_spec.version} no longer has the consteval detection this Podfile patches — " \
+                 'review the patch instead of trusting it.'
+    return
+  end
+
+  patched = source.sub(anchor, "// Patched by the Podfile: force consteval off (see the note above).\n#{marker}")
+  # CocoaPods locks downloaded pod sources read-only, so make this one header writable for
+  # the edit and put its permissions back afterwards.
+  mode = File.stat(header).mode
+  File.chmod(mode | 0o200, header)
+  begin
+    File.write(header, patched)
+  ensure
+    File.chmod(mode, header)
+  end
+  Pod::UI.puts "Patched fmt #{fmt.root_spec.version} to build with Xcode 26+.".green
+end
+
 linkage = ENV['USE_FRAMEWORKS']
 if linkage != nil
   Pod::UI.puts "Configuring Pod with #{linkage}ally linked Frameworks".green
@@ -31,5 +83,7 @@ target 'VeyraBank' do
       :mac_catalyst_enabled => false,
       # :ccache_enabled => true
     )
+
+    veyra_patch_fmt_consteval(installer)
   end
 end

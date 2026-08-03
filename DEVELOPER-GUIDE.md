@@ -307,6 +307,22 @@ Android-only; `ended` is iOS-only.
 issuer (incl. cancellation) · `'99'` pending — do **not** re-charge · `'91'` issuer
 unavailable · `'96'` ambiguous — check history before retrying.
 
+**Show a terminal outcome on a screen, not in an alert.** `result` is where the payment
+ends for the merchant standing at the counter: they need the amount, the response and the
+reference to stay on screen — an alert that can be dismissed by a stray tap is not enough.
+This sample sends every rail (tap, both QR rails, and the wallet's scan-to-pay) to one
+`PaymentResult` screen, which also decides when a receipt may be offered:
+
+| Outcome | Receipt? | Why |
+|---|---|---|
+| Approved (`'00'`) | yes | recorded and final |
+| Declined (`'05'`/`'06'`/other) | yes | the gateway recorded the attempt |
+| Pending (`'99'`) | **no** | not final — the status can still change |
+| Never reached the gateway | **no** | nothing was recorded to print |
+
+See `src/paymentResult.ts` (the mapping, unit-tested) and
+`src/screens/PaymentResultScreen.tsx` (the screen, which returns Home by itself after 5s).
+
 **You never handle NFC intents.** The SDK arms and disarms Android reader mode itself for
 the duration of a get-paid session, so cards are read while your screen is open without any
 NFC intent filter in the manifest and without forwarding intents from `onNewIntent` — there

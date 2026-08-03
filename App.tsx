@@ -15,6 +15,8 @@ import { ShowToPayScreen } from './src/screens/ShowToPayScreen';
 import { WalletTransactionsScreen } from './src/screens/WalletTransactionsScreen';
 import { WalletReceiptsScreen } from './src/screens/WalletReceiptsScreen';
 import { MerchantSettingsScreen } from './src/screens/MerchantSettingsScreen';
+import { PaymentResultScreen } from './src/screens/PaymentResultScreen';
+import type { PaymentResultParams } from './src/paymentResult';
 import { theme } from './src/theme';
 
 // Veyra Bank neo-bank theme (matches the native samples: black + crimson accent).
@@ -43,6 +45,8 @@ export type RootStackParamList = {
   ShowToPay: { cardId: string };
   WalletTransactions: { tokenUniqueReference: string };
   WalletReceipts: undefined;
+  /** Terminal outcome of any rail — tap, merchant QR, customer QR, scan-to-pay. */
+  PaymentResult: PaymentResultParams;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -88,6 +92,13 @@ export default function App(): React.JSX.Element {
         <Stack.Screen name="ShowToPay" component={ShowToPayScreen} options={{ title: 'Show QR to pay' }} />
         <Stack.Screen name="WalletTransactions" component={WalletTransactionsScreen} options={{ title: 'Transactions' }} />
         <Stack.Screen name="WalletReceipts" component={WalletReceiptsScreen} options={{ title: 'Receipts' }} />
+        <Stack.Screen
+          name="PaymentResult"
+          component={PaymentResultScreen}
+          // A settled payment is not something to back out of: the only ways off the
+          // result are Done, the receipt, or the auto-return — as on the native pages.
+          options={{ title: 'Payment result', headerBackVisible: false, gestureEnabled: false }}
+        />
       </Stack.Navigator>
     </NavigationContainer>
   );

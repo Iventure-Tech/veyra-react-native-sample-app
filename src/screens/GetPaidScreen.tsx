@@ -12,6 +12,12 @@ import {
   type ScannedCustomerQr,
 } from 'veyra-sdk-react-native';
 import type { RootStackParamList } from '../../App';
+import {
+  contextSettlementToParams,
+  cpmChargeFailureToParams,
+  cpmChargeToParams,
+  tapResultToParams,
+} from '../paymentResult';
 import { Scanner } from '../Scanner';
 import { theme } from '../theme';
 import { QrTile, Busy, Button, Field, formatAmount, Section } from '../ui';
@@ -42,6 +48,9 @@ export function GetPaidScreen({
   const [cpm, setCpm] = useState<ScannedCustomerQr | null>(null);
   const [lastApprovedRef, setLastApprovedRef] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // The amount the live rail was started with. The result must show what was charged,
+  // not whatever is in the amount field by the time the outcome lands.
+  const chargedRef = useRef(0);
 
   const active = merchantStatus === null || merchantStatus === 'ACTIVE';
 
@@ -82,9 +91,9 @@ export function GetPaidScreen({
           if (e.result.status === 'APPROVED' && e.result.merchantTransactionReference) {
             setLastApprovedRef(e.result.merchantTransactionReference);
           }
-          Alert.alert(
-            e.result.status ?? 'Result',
-            `${e.result.responseCode ?? ''} ${e.result.message ?? ''}`.trim()
+          navigation.navigate(
+            'PaymentResult',
+            tapResultToParams(e.result, chargedRef.current)
           );
           break;
         default:
@@ -92,7 +101,7 @@ export function GetPaidScreen({
       }
     });
     return () => sub.remove();
-  }, []);
+  }, [navigation]);
 
   // An expired get-paid QR must stop being shown — it is no longer chargeable.
   useEffect(() => {
@@ -123,6 +132,7 @@ export function GetPaidScreen({
     if (!requireActive()) return;
     try {
       const { sessionId } = await merchant.tap.start({ amountMinorUnits: minorUnits });
+      chargedRef.current = minorUnits;
       setTapSessionId(sessionId);
       setRail('tap');
       setHint('Ask the customer to tap their phone or card');
@@ -141,6 +151,7 @@ export function GetPaidScreen({
     if (!requireActive()) return;
     try {
       const qr = await merchant.createPaymentContext(minorUnits);
+      chargedRef.current = minorUnits;
       setMpmQr(qr);
       setMpmState('PENDING');
       setMpmExpired(false);
@@ -149,11 +160,24 @@ export function GetPaidScreen({
         const status = await merchant.contextStatus(qr.txRef).catch(() => null);
         if (!status) return;
         setMpmState(status.state);
-        if (status.state === 'EXPIRED') setMpmExpired(true);
-        if (status.isSettled || status.state === 'EXPIRED') {
+        // An expired code is not an outcome: blank the QR and stay here with the
+        // renewal action, like the native QR page. Only a settled push is a result.
+        if (status.state === 'EXPIRED') {
+          setMpmExpired(true);
+          if (pollRef.current) clearInterval(pollRef.current);
+          return;
+        }
+        if (status.isSettled) {
           if (pollRef.current) clearInterval(pollRef.current);
           if (status.isApproved) setLastApprovedRef(qr.txRef);
-          Alert.alert(status.state, status.responseCode ?? '');
+          setRail('idle');
+          setMpmQr(null);
+          // The code is spent — stop the SDK expiry timer so it cannot fire behind the result.
+          merchant.cancelQrExpiry().catch(() => {});
+          navigation.navigate(
+            'PaymentResult',
+            contextSettlementToParams(status, chargedRef.current)
+          );
         }
       }, 2000);
     } catch (e) {
@@ -184,15 +208,20 @@ export function GetPaidScreen({
   const chargeCpm = async () => {
     if (!cpm) return;
     if (!requireActive()) return;
+    const charged = cpm.amountMinorUnits; // the amount rides in the customer's QR
     setRail('idle');
     try {
       const outcome = await merchant.chargeCustomerQr(cpm.handle);
       if (outcome.approved && outcome.merchantTransactionReference) {
         setLastApprovedRef(outcome.merchantTransactionReference);
       }
-      Alert.alert(outcome.approved ? 'Approved' : 'Declined', outcome.responseCode ?? '');
+      navigation.navigate('PaymentResult', cpmChargeToParams(outcome, charged));
     } catch (e) {
-      Alert.alert('Charge failed', (e as VeyraError).message);
+      // Never reached the gateway: nothing was recorded, so the result carries no receipt.
+      navigation.navigate(
+        'PaymentResult',
+        cpmChargeFailureToParams((e as VeyraError).message, charged)
+      );
     } finally {
       setCpm(null);
     }

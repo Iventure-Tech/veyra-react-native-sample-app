@@ -9,6 +9,7 @@ import {
   type ScanInspection,
 } from 'veyra-sdk-react-native';
 import type { RootStackParamList } from '../../App';
+import { walletPaymentFailureToParams, walletPaymentToParams } from '../paymentResult';
 import { Scanner } from '../Scanner';
 import { theme } from '../theme';
 import { Button, formatAmount, Section } from '../ui';
@@ -39,16 +40,22 @@ export function ScanToPayScreen({
       // Fresh device authentication is required per payment.
       await wallet.authenticateForPayment('Confirm payment');
       const outcome = await wallet.payScannedContext(inspection.handle);
-      Alert.alert(outcome.approved ? 'Paid' : 'Declined', outcome.message ?? outcome.responseCode ?? '');
-      navigation.goBack();
+      // Replace, not push: the confirm screen is spent, so backing out of the result
+      // must not land on a scanned context that can no longer be paid.
+      navigation.replace(
+        'PaymentResult',
+        walletPaymentToParams(outcome, inspection.amountMinorUnits)
+      );
     } catch (e) {
       const err = e as VeyraError;
       if (err.code === 'AUTH_CANCELLED') {
         setBusy(false);
         return; // user backed out of biometrics — stay on the confirm screen
       }
-      Alert.alert('Payment failed', err.message);
-      navigation.goBack();
+      navigation.replace(
+        'PaymentResult',
+        walletPaymentFailureToParams(err.message, inspection.amountMinorUnits)
+      );
     }
   };
 

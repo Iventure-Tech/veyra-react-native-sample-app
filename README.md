@@ -90,6 +90,7 @@ catalogue — lives in this repository.
 | `src/screens/PayScreen.tsx` | The wallet flow — `usePaySession`, card states, tap arming |
 | `src/screens/AddCardScreen.tsx` | Digitisation + activation |
 | `src/screens/ScanToPayScreen.tsx` / `ShowToPayScreen.tsx` | The wallet QR rails |
+| `src/screens/PaymentResultScreen.tsx` + `src/paymentResult.ts` | Where every rail's terminal outcome lands, and when a receipt may be offered |
 | `DEVELOPER-GUIDE.md` | The full React Native developer guide |
 
 Building **native**? See

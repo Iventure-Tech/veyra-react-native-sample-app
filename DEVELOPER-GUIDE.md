@@ -367,6 +367,16 @@ One `NativeEventEmitter` channel per family; subscribe via the typed helpers and
 
 Every rejection is a `VeyraError` with a stable `code` — never string-match messages:
 
+> **Read `response_status`, not the code (STORY-98 / ISSUE-140).** Every payment outcome now carries a
+> triple: `response_code` (what the wire said), `response_status` (**what to do**) and
+> `response_status_reason` (why). Branch on `response_status` only — `APPROVED`, `DECLINED`, `FAILED`
+> or `PENDING`. Only the first three are final; `PENDING` always means "ask again". The SDK no longer
+> derives a status from the code, and neither should your app: a code you do not recognise is not a
+> decline. `"99"` is retired — an unheard outcome is now `68` (no reply), `06` (the hop we called
+> failed) or `96` (the SDK/service itself threw), all `PENDING`, while `91` (never connected) and
+> `25` (no such transaction) are `FAILED`, meaning nothing happened and a retry is safe.
+
+
 | Code | Meaning / action |
 |---|---|
 | `NOT_CONFIGURED` | call `Veyra.initialize` first |

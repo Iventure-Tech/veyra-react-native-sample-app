@@ -420,3 +420,60 @@ Every rejection is a `VeyraError` with a stable `code` — never string-match me
 - **Tap works on first launch, then stops after reload** — call `Veyra.initialize`
   again on app start (this sample's `App.tsx` pattern); the SDK re-attaches to the
   recreated native screen.
+
+### Holding a `PENDING` payment, and being told when it settles
+
+Because the SDK no longer invents terminal outcomes, a tap that gets no answer hands you
+`responseStatus == PENDING`. **That is not a failure and not a decline** — the payment may well have
+completed, so the one thing you must not do is charge again.
+
+What the app should do:
+
+1. **Stay on the confirmation screen** and show "processing". Do not navigate away and do not print a
+   receipt yet.
+2. **Let the SDK resolve it.** It stores the transaction and polls with backoff; you do not have to.
+3. **Finish when it settles** — either from `onTransactionResolved` (below) or by reading the row with
+   `getTransaction(reference)` / `getLastTransactions()`.
+
+A pending row always converges: it becomes `APPROVED`, `DECLINED` or `FAILED` when the backend settles
+it, or it stays `PENDING`. It never turns into a terminal outcome the SDK made up, and there is no
+attempt cap that gives up on it.
+
+**`TRANSACTION_IN_PROCESS_ESCALATED`** is the one reason that changes what *you* do. It means automated
+reconciliation has stopped and a human will settle the payment. Stop any tight loop of your own, tell
+the merchant "we're looking into this", and re-check lazily — next app open, or a long backoff. It will
+still resolve; it just will not resolve in seconds.
+
+#### `onTransactionResolved` — the SDK pushes the answer
+
+```js
+import { DeviceEventEmitter } from 'react-native';
+
+DeviceEventEmitter.addListener('VeyraTransactionResolvedEvent', (r) => {
+  // r.merchantTransactionReference — which payment
+  // r.status — APPROVED / DECLINED / FAILED (never PENDING)
+  // r.reason — e.g. INSUFFICIENT_FUNDS
+  // r.responseCode — the wire literal, for receipts and support
+});
+```
+
+Four things worth knowing before you rely on it:
+
+- **Subscribe once, at start-up** — not per payment. It fires for *any* transaction that resolves,
+  including one started in an earlier app session and settled by a later poll. That is the case that
+  matters most: a tap that resolves after your app was backgrounded or killed.
+- **It does not replay.** If your app was not running when the row settled, nothing is queued for you —
+  read `getLastTransactions()` at start-up. The observer is a convenience over the store, not a delivery
+  guarantee, so keep the read path.
+- **The payment callback still fires exactly once**, possibly with `PENDING`. The resolution arrives on
+  this separate channel; the two are not alternatives.
+- The event is emitted on the JS thread, like every other Veyra event.
+
+#### When the SDK could not start a payment at all
+
+`sdkErrorCode` is set when nothing was ever attempted — request validation, no merchant profile, a
+mode/arming refusal, a card that could not be read — or when the SDK itself failed. There is **no**
+response code and **no** status in that case, deliberately: a response code asserts that a payment was
+attempted and something answered or failed to, so a fabricated one would invite you to retry something
+that never left the device (and put a made-up code on a receipt). Fix the input and re-initiate.
+

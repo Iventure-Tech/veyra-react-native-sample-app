@@ -237,9 +237,19 @@ iOS-only param: `bankName` (shown on the stored card). Android additionally requ
 |---|---|
 | `wallet.requestActivationCode(ref, medium, contact?, reason?)` | iOS supports `MASKED_EMAIL` / `MASKED_MOBILE_PHONE` media |
 | `wallet.activate(ref, code)` | submit the OTP |
-| `wallet.checkTokenActive(ref)` | one-shot server check |
+| `wallet.checkTokenActive(ref)` | one-shot server check (boolean) |
+| `wallet.tokenStatus(ref)` | one-shot server check, five-valued (`ACTIVE` / `PENDING_ACTIVATION` / `SUSPENDED` / `DEACTIVATED` / `EXPIRED`) — say *why* a card is unavailable |
 | `wallet.observeActivation(ref)` + `wallet.onActivationEvent(cb)` | polls every 10s for ≤5min; events `activated` / `timeout` / `error` |
 | `pause/resume/stopActivationObserver(ref)` | the timeout clock keeps running while paused |
+
+On `status: 'FAILURE'` both activation responses carry a typed `failureCode` — branch on it,
+never on `message`: `CODE_INVALID` (stay on entry; `attemptsRemaining` says how many are left),
+`CODE_EXPIRED` (offer resend), `CODE_REQUEST_RATE_LIMITED` (disable "resend" with a cool-down —
+do **not** end the flow), `MAX_ATTEMPTS_EXCEEDED` (cycle closed; honour `recommendDelete` —
+`'MUST'`: delete the token and restart add-card, `'MAY'`: advisory), `ACTIVATION_LOCKED`
+(terminal — hide retry and resend; direct the user to their bank), `NO_PENDING_ACTIVATION`
+(request a code first). Codes newer than this SDK pass through verbatim — show `message` and log
+the code.
 
 An observer polls, so tie its life to the screen that shows the card: observe every card with
 `requiresActivation`, pause on blur and resume on focus, and stop on unmount. Re-observing a token
@@ -253,7 +263,8 @@ track what you already observe instead of re-issuing on every render. See `PaySc
 1. `requiresActivation` — offer the activation flow.
 2. `requiresOnline` — **grey the card out and disable pay affordances**; the SDK
    restores it by itself once the device is online. Nothing to call.
-3. `!isActive` — blocked server-side (`status` e.g. `SUSPENDED`).
+3. `!isActive` — blocked server-side; `status` says why on both platforms (`SUSPENDED`:
+   "contact your bank" · `PENDING_ACTIVATION`: "activate this card" · `EXPIRED`: "re-add the card").
 4. Otherwise payable.
 
 `wallet.setActiveCard(card.id)` selects the card; on Android it also arms tap-to-pay

@@ -12,6 +12,12 @@ import type { RootStackParamList } from '../../App';
 import { theme } from '../theme';
 import { Busy, Button, formatAmount, Section } from '../ui';
 
+// How often the focused Pay screen re-reads the card list — card state can move without user
+// action (LUK refresh, status sync), and this bounds how stale a long-parked screen can get.
+// Sized against the LUK expiry (24 h): a couple of hours is plenty to catch a card freezing
+// or unfreezing, without pointless churn (instructor decision, 2026-08-07).
+const CARD_LIST_RELOAD_MS = 7_200_000; // 2 hours
+
 /**
  * The wallet screen. `usePaySession` keeps tap-to-pay armed only while this screen is
  * focused; selecting a card (Android) arms it for tapping. Cards with
@@ -44,6 +50,16 @@ export function PayScreen({
   }, []);
 
   useFocusEffect(reload);
+
+  // The list also changes with no tap and no navigation — a background LUK refresh clears
+  // `requiresOnline`, the status sync can suspend or unfreeze a card — so re-read it on a
+  // timer while this screen is showing (instructor decision, 2026-08-07). Like the activation
+  // observers below, the poll follows the screen: stopped on blur, restarted on focus.
+  useEffect(() => {
+    if (!focused) return;
+    const id = setInterval(reload, CARD_LIST_RELOAD_MS);
+    return () => clearInterval(id);
+  }, [focused, reload]);
 
   // Re-arm the remembered card whenever this screen becomes the payment screen. Runs after
   // usePaySession above, so the pay session setActiveCard requires is already open.
@@ -122,14 +138,19 @@ export function PayScreen({
       if (e.type === 'transactionCompleted') {
         setTapStatus(null);
         Alert.alert(e.status, `${e.message ?? ''} ${e.amountMinorUnits ? formatAmount(e.amountMinorUnits) : ''}`.trim());
+        // A tap can change card state (a card that spent its last payment key flips to
+        // `requiresOnline`, and the recent-transactions preview grows) — re-read the list so
+        // that renders here, on the screen taps happen on, not on the next navigation.
+        reload();
       }
       if (e.type === 'activationFailed') {
         setTapStatus(null);
         Alert.alert('Card unavailable', e.message);
+        reload();
       }
     });
     return () => sub.remove();
-  }, []);
+  }, [reload]);
 
   const removeCard = (card: Card) => {
     Alert.alert('Remove this card?', 'The token is deactivated on the backend and removed from this device.', [

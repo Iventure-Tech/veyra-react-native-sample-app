@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text } from 'react-native';
+import { Alert, StyleSheet, Text } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Pressable } from 'react-native';
 import { merchant, type Bank, type MerchantType } from 'veyra-sdk-react-native';
 import { theme } from '../theme';
 import type { RootStackParamList } from '../../App';
 import { SAMPLE_ACCOUNT } from '../../veyra.config';
-import { Button, Field, Section } from '../ui';
+import { Button, Field, FormScrollView, Section } from '../ui';
 
 export function RegisterMerchantScreen({
   navigation,
@@ -67,7 +67,7 @@ export function RegisterMerchantScreen({
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <FormScrollView contentContainerStyle={styles.container}>
       <Section title="Merchant type">
         <Button
           title={merchantType === 'PERSONAL' ? 'Personal ✓' : 'Personal'}
@@ -114,7 +114,7 @@ export function RegisterMerchantScreen({
         <Field label="Acquirer id" value={form.acquirerId} onChangeText={set('acquirerId')} />
         <Button title="Register" onPress={register} />
       </Section>
-    </ScrollView>
+    </FormScrollView>
   );
 }
 

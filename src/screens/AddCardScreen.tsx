@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
   wallet,
@@ -9,7 +9,7 @@ import {
 import type { RootStackParamList } from '../../App';
 import { SAMPLE_ACCOUNT } from '../../veyra.config';
 import { theme } from '../theme';
-import { Busy, Button, Field, Section } from '../ui';
+import { Busy, Button, Field, FormScrollView, Section } from '../ui';
 
 type Step = 'form' | 'banks' | 'digitising' | 'chooseMethod' | 'enterCode' | 'waiting';
 
@@ -142,7 +142,7 @@ export function AddCardScreen({
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <FormScrollView contentContainerStyle={styles.container}>
       {step === 'banks' && (
         <Section title="Choose your bank">
           {banks.length === 0 && <Busy label="Loading banks…" />}
@@ -191,7 +191,7 @@ export function AddCardScreen({
       )}
 
       {step === 'waiting' && <Busy label="Activating…" />}
-    </ScrollView>
+    </FormScrollView>
   );
 }
 

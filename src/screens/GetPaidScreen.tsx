@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import QRCode from 'react-native-qrcode-svg';
@@ -20,9 +20,9 @@ import {
 } from '../paymentResult';
 import { Scanner } from '../Scanner';
 import { theme } from '../theme';
-import { QrTile, Busy, Button, Field, formatAmount, Section } from '../ui';
+import { QrTile, Busy, Button, Field, formatAmount, FormScrollView, Section } from '../ui';
 
-type Rail = 'idle' | 'tap' | 'mpm' | 'cpmScan' | 'cpmConfirm';
+type Rail = 'idle' | 'tap' | 'mpm' | 'cpmScan' | 'cpmConfirm' | 'cpmCharging';
 
 /**
  * The merchant screen. `useGetPaidSession` is the load-bearing line: while this screen
@@ -209,7 +209,9 @@ export function GetPaidScreen({
     if (!cpm) return;
     if (!requireActive()) return;
     const charged = cpm.amountMinorUnits; // the amount rides in the customer's QR
-    setRail('idle');
+    // Stay on a visible processing state for the whole round trip — dropping back to
+    // the idle screen here reads as the payment having vanished.
+    setRail('cpmCharging');
     try {
       const outcome = await merchant.chargeCustomerQr(cpm.handle);
       if (outcome.approved && outcome.merchantTransactionReference) {
@@ -224,6 +226,7 @@ export function GetPaidScreen({
       );
     } finally {
       setCpm(null);
+      setRail('idle');
     }
   };
 
@@ -244,7 +247,7 @@ export function GetPaidScreen({
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <FormScrollView contentContainerStyle={styles.container}>
       {!active && (
         <View style={styles.inactiveBanner}>
           <Text style={styles.inactiveText}>
@@ -310,7 +313,14 @@ export function GetPaidScreen({
           <Button title="Cancel" destructive onPress={() => { setCpm(null); setRail('idle'); }} />
         </Section>
       )}
-    </ScrollView>
+
+      {rail === 'cpmCharging' && cpm && (
+        <Section title={`Charging — ${formatAmount(cpm.amountMinorUnits)}`}>
+          <Busy label="Processing payment…" />
+          <Text style={styles.body}>Contacting the bank — keep this screen open.</Text>
+        </Section>
+      )}
+    </FormScrollView>
   );
 }
 

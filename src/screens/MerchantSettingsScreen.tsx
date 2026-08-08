@@ -5,7 +5,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { merchant, type StoredMerchant } from 'veyra-sdk-react-native';
 import type { RootStackParamList } from '../../App';
 import { theme } from '../theme';
-import { Busy, Button, Field, Section } from '../ui';
+import { Busy, Button, Field, FormScrollView, Section } from '../ui';
 
 /**
  * Merchant settings: profile view + edit (updateMerchant), backend status controls
@@ -81,7 +81,7 @@ export function MerchantSettingsScreen({
 
   if (editing) {
     return (
-      <ScrollView contentContainerStyle={styles.container}>
+      <FormScrollView contentContainerStyle={styles.container}>
         <Section title="Edit profile">
           <Field label="Merchant name" value={form.merchantName} onChangeText={set('merchantName')} />
           <Field label="Email" value={form.emailAddress} onChangeText={set('emailAddress')} keyboardType="email-address" />
@@ -99,7 +99,7 @@ export function MerchantSettingsScreen({
           />
           <Button title="Cancel" destructive disabled={!!busy} onPress={() => setEditing(false)} />
         </Section>
-      </ScrollView>
+      </FormScrollView>
     );
   }
 

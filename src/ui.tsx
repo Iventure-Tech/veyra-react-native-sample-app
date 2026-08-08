@@ -8,7 +8,6 @@ import React, {
 } from 'react';
 import {
   ActivityIndicator,
-  Dimensions,
   Keyboard,
   Pressable,
   ScrollView,
@@ -21,8 +20,8 @@ import {
 } from 'react-native';
 import { theme } from './theme';
 
-/** Gap kept between the focused field's bottom edge and the keyboard. */
-const KEYBOARD_CLEARANCE = 12;
+/** Where the focused field comes to rest, measured from the form's top edge. */
+const FOCUSED_FIELD_REST_OFFSET = 72;
 
 const FormScrollContext = createContext<(() => void) | null>(null);
 
@@ -40,34 +39,43 @@ export function FormScrollView(props: {
   contentContainerStyle?: StyleProp<ViewStyle>;
 }): React.JSX.Element {
   const scrollRef = useRef<ScrollView>(null);
+  const contentAnchorRef = useRef<View>(null);
   const scrollOffsetY = useRef(0);
-  const keyboardHeightRef = useRef(0);
+  const keyboardUp = useRef(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
 
+  // Hoist the focused field to a fixed rest position near the top of the form. Android's
+  // coordinate APIs disagree about the keyboard's edge (measureInWindow is window-relative,
+  // the keyboard event's screenY is screen-relative, and its height omits the nav-bar
+  // inset — all three bit on device), so no keyboard geometry is used at all: the field
+  // and the ScrollView are measured in the same space, and a spot near the form's top is
+  // above any keyboard by construction.
   const scrollFocusedFieldIntoView = useCallback(() => {
     const input = TextInput.State.currentlyFocusedInput();
-    if (input == null || keyboardHeightRef.current === 0) {
+    const anchor = contentAnchorRef.current;
+    if (input == null || anchor == null || !keyboardUp.current) {
       return;
     }
-    input.measureInWindow((_x: number, y: number, _w: number, h: number) => {
-      // measureInWindow is window-relative while the keyboard event's screenY is
-      // screen-relative (they differ by the status bar), so anchor the keyboard's top
-      // to the shared bottom edge instead: window height − keyboard height.
-      const keyboardTop = Dimensions.get('window').height - keyboardHeightRef.current;
-      const overlap = y + h + KEYBOARD_CLEARANCE - keyboardTop;
-      if (overlap > 0) {
-        scrollRef.current?.scrollTo({ y: scrollOffsetY.current + overlap, animated: true });
-      }
+    anchor.measureInWindow((_ax: number, anchorY: number) => {
+      input.measureInWindow((_x: number, y: number) => {
+        // y − anchorY is the field's distance from the content top, i.e. the absolute
+        // scroll offset that puts it at the very top; back off to the rest position.
+        const target = y - anchorY - FOCUSED_FIELD_REST_OFFSET;
+        // Only scroll downwards — a field already at or above the rest position is visible.
+        if (target > scrollOffsetY.current + 1) {
+          scrollRef.current?.scrollTo({ y: Math.max(0, target), animated: true });
+        }
+      });
     });
   }, []);
 
   useEffect(() => {
     const show = Keyboard.addListener('keyboardDidShow', (e) => {
-      keyboardHeightRef.current = e.endCoordinates.height;
+      keyboardUp.current = true;
       setKeyboardHeight(e.endCoordinates.height);
     });
     const hide = Keyboard.addListener('keyboardDidHide', () => {
-      keyboardHeightRef.current = 0;
+      keyboardUp.current = false;
       setKeyboardHeight(0);
     });
     return () => {
@@ -81,7 +89,7 @@ export function FormScrollView(props: {
   // much of the new padding hasn't rendered yet. onContentSizeChange fires after the
   // padded layout lands.
   const onContentSizeChange = useCallback(() => {
-    if (keyboardHeightRef.current > 0) {
+    if (keyboardUp.current) {
       scrollFocusedFieldIntoView();
     }
   }, [scrollFocusedFieldIntoView]);
@@ -100,6 +108,8 @@ export function FormScrollView(props: {
           props.contentContainerStyle,
           keyboardHeight > 0 && { paddingBottom: keyboardHeight },
         ]}>
+        {/* Zero-height marker for the content's top edge — the measuring anchor above. */}
+        <View ref={contentAnchorRef} collapsable={false} />
         {props.children}
       </ScrollView>
     </FormScrollContext.Provider>

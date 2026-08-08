@@ -78,6 +78,10 @@ export function WalletTransactionsScreen({
       ['Location', t.merchantLocation],
       ['Amount', formatAmount(t.amountMinorUnits)],
       ['Status', t.authorizationStatus ?? 'PENDING'],
+      // The outcome's stated cause + code, verbatim from the backend; unresolved/legacy rows
+      // carry neither and the rows render empty rather than a guess.
+      ['Reason', t.responseStatusReason],
+      ['Response code', t.responseCode],
       ['Entry', t.entryMethod],
       ['Time', t.localTransactionDateTime],
       ['Reference', t.merchantTransactionReference],

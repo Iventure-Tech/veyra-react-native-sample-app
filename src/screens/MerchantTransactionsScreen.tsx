@@ -43,6 +43,8 @@ export function MerchantTransactionsScreen({
       ['Amount', formatAmount(detail.amountMinorUnits)],
       ['Status', detail.status],
       ['Response code', detail.responseCode],
+      // The outcome's stated cause, verbatim from the backend (e.g. INSUFFICIENT_FUNDS).
+      ['Reason', detail.responseStatusReason],
       ['Time', detail.transactionTime],
       ['Transaction id', detail.transactionId],
       ['Card', detail.maskedTokenLast4],

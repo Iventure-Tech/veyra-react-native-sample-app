@@ -11,6 +11,7 @@ import type {
   PaymentOutcome,
 } from 'veyra-sdk-react-native';
 import {
+  AUTO_RETURN_MS,
   contextSettlementToParams,
   cpmChargeFailureToParams,
   cpmChargeToParams,
@@ -18,6 +19,14 @@ import {
   walletPaymentFailureToParams,
   walletPaymentToParams,
 } from '../src/paymentResult';
+
+describe('AUTO_RETURN_MS', () => {
+  // The hold is a product decision, not a tuning knob: every terminal result — merchant and
+  // wallet, approved and declined — stays up for a full minute with Done available throughout.
+  it('holds a terminal result for 60 seconds', () => {
+    expect(AUTO_RETURN_MS).toBe(60000);
+  });
+});
 
 const tap = (over: Partial<MerchantTapResult> = {}): MerchantTapResult => ({
   responseCode: null,

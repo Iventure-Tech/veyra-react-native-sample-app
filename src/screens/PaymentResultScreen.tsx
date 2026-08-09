@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { useIsFocused } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import Svg, { Circle } from 'react-native-svg';
 import { merchant } from 'veyra-sdk-react-native';
@@ -26,7 +26,13 @@ const LOOK: Record<PaymentResultOutcome, { color: string; glyph: string; word: s
  * The single result screen every rail ends on — the RN twin of the native samples'
  * result page. A terminal outcome is a destination, not a notification: it stays up with
  * the amount and reference, offers the receipt, and returns Home by itself after
- * {@link AUTO_RETURN_MS} (Done returns immediately).
+ * {@link AUTO_RETURN_MS} (Done returns immediately). That hold is the default for EVERY
+ * terminal outcome — approved, declined, failed.
+ *
+ * The single exception: while the sale is waiting on the merchant bank's credit confirmation
+ * the hold is cancelled outright — the screen must not disappear mid-wait — and a fresh hold
+ * starts the moment the confirmation is displayed. Dismissing is an app concern only: the
+ * SDK's credit poll is app-scoped and keeps running whatever this screen does.
  *
  * Auto-return is armed once and disarmed the moment the screen loses focus, so a merchant
  * who steps into the receipt does not get pulled Home when they come back — the same
@@ -106,17 +112,22 @@ export function PaymentResultScreen({
     ]).start();
   }, [scale, sweep]);
 
+  // The hold. Re-runs whenever the credit-confirmation state changes, which is what turns the
+  // timer off while the sale is waiting and starts a FRESH one once the answer is displayed.
   const armed = useRef(true);
-  useFocusEffect(
-    useCallback(() => {
-      if (!armed.current) return;
-      const timer = setTimeout(goHome, AUTO_RETURN_MS);
-      return () => {
-        clearTimeout(timer);
-        armed.current = false; // leaving for any reason (receipt, Done) disarms for good
-      };
-    }, [goHome])
-  );
+  const focused = useIsFocused();
+  useEffect(() => {
+    if (!focused) {
+      armed.current = false; // leaving for any reason (receipt, Done) disarms for good
+      return;
+    }
+    if (!armed.current) return;
+    // Waiting on the merchant bank: hold indefinitely — Done is the only way out until the
+    // confirmation lands, at which point this effect re-runs and re-arms the full window.
+    if (creditState === 'waiting') return;
+    const timer = setTimeout(goHome, AUTO_RETURN_MS);
+    return () => clearTimeout(timer);
+  }, [creditState, focused, goHome]);
 
   return (
     <View style={styles.container}>

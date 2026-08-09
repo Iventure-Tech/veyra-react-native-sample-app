@@ -332,7 +332,8 @@ This sample sends every rail (tap, both QR rails, and the wallet's scan-to-pay) 
 | Never reached the gateway | **no** | nothing was recorded to print |
 
 See `src/paymentResult.ts` (the mapping, unit-tested) and
-`src/screens/PaymentResultScreen.tsx` (the screen, which returns Home by itself after 5s).
+`src/screens/PaymentResultScreen.tsx` (the screen, which holds the result for `AUTO_RETURN_MS`
+— 60s — with **Done** dismissing immediately, then returns Home by itself; see §7.5).
 
 **You never handle NFC intents.** The SDK arms and disarms Android reader mode itself for
 the duration of a get-paid session, so cards are read while your screen is open without any
@@ -408,6 +409,20 @@ execution; it suspends and resumes with the app; iOS also has no tap rail). The
 asymmetry is only in the *event*: it **fires on Android only** today — shared JS may
 subscribe unconditionally (on iOS it simply never fires) and rely on the stored row for
 the flip, as the sample does.
+
+**Holding the result screen (your app's decision, never the SDK's).** A terminal outcome is
+a destination, not a notification. `PaymentResultScreen` holds every terminal result —
+merchant and wallet, approved, declined, pending and failed alike — for `AUTO_RETURN_MS`
+(**60s**, exported from `src/paymentResult.ts` and unit-tested), with **Done** visible for the
+whole hold and dismissing immediately; when the hold expires the screen pops back to the top
+of the stack on its own. The single exception is an approved sale waiting on credit
+confirmation: while the waiting line is up the hold is **cancelled outright** — the screen
+must not vanish while the merchant's bank is still being asked — and a **fresh 60s** starts
+the moment the confirmation is displayed. Non-terminal states are untouched: an unsupported
+card or lost contact keeps the waiting screen up, armed for a re-tap, and holds/dismisses
+nothing. How long a result stays up and what dismisses it are app concerns end to end — the
+SDK has no concept of a screen and supplies no duration, and dismissing a screen never stops
+its app-scoped credit polling.
 
 ## 8. Events
 

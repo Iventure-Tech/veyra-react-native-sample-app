@@ -45,8 +45,16 @@ export interface PaymentResultParams {
   };
 }
 
-/** How long a result stays up before returning Home by itself (native samples: 5s). */
-export const AUTO_RETURN_MS = 5000;
+/**
+ * How long a terminal result is HELD before the screen returns Home by itself — approved,
+ * declined and failed alike. Done returns immediately, at any point during the hold. 60s, the
+ * same as the native samples: long enough to read the outcome out to the customer.
+ *
+ * The one exception lives in the result screen, not here: a sale waiting on the merchant bank's
+ * credit confirmation cancels the hold entirely (the screen must not vanish mid-wait) and starts
+ * a fresh one once the confirmation is on screen.
+ */
+export const AUTO_RETURN_MS = 60000;
 
 const PENDING_MESSAGE =
   'Status unknown. The issuer may have approved. Check transactions for updates.';

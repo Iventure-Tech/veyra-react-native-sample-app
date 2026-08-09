@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import Svg, { Circle } from 'react-native-svg';
+import { merchant } from 'veyra-sdk-react-native';
 import type { RootStackParamList } from '../../App';
 import { AUTO_RETURN_MS, type PaymentResultOutcome } from '../paymentResult';
 import { theme } from '../theme';
@@ -35,8 +36,52 @@ export function PaymentResultScreen({
   navigation,
   route,
 }: NativeStackScreenProps<RootStackParamList, 'PaymentResult'>): React.JSX.Element {
-  const { outcome, title, message, amountMinorUnits, details, receiptFor } = route.params;
+  const { outcome, title, message, amountMinorUnits, details, receiptFor, creditConfirmation } =
+    route.params;
   const look = LOOK[outcome];
+
+  // Beneficiary credit confirmation: an approved sale whose merchant bank supports it shows a
+  // waiting line here and flips it when the SDK's background poll confirms the funds landed
+  // ('received'), or on the final 30-day give-up ('unable') — never on a mid-window miss.
+  const [creditState, setCreditState] = useState<'waiting' | 'received' | 'unable' | null>(
+    creditConfirmation?.supported === true ? 'waiting' : null
+  );
+
+  // The SDK owns the polling; the screen just reacts. Match the event to this sale by
+  // reference (or credit id) — the SDK-wide event can fire for a sale from an earlier session.
+  useEffect(() => {
+    if (!creditConfirmation) return;
+    const sub = merchant.onCreditConfirmation((e) => {
+      const matches =
+        e.merchantTransactionReference === creditConfirmation.reference ||
+        (!!creditConfirmation.creditTransactionId &&
+          e.creditTransactionId === creditConfirmation.creditTransactionId);
+      if (!matches) return;
+      setCreditState(e.status === 'RECEIVED' ? 'received' : 'unable');
+    });
+    return () => sub.remove();
+  }, [creditConfirmation]);
+
+  // Polling is SDK-owned and app-scoped — never screen-scoped: the SDK's background sweep
+  // keeps asking the merchant's bank whatever screen is up, and persists each answer to its
+  // store. This screen only renders that store: re-read the sale's row every few seconds while
+  // visible, so a confirmation stamped while the merchant was elsewhere shows on return, and a
+  // merchant-QR sale (whose settle can't carry the supported flag — the SDK learns it from the
+  // transaction-status rail moments later) starts waiting once the flag turns up true.
+  useEffect(() => {
+    if (!creditConfirmation) return;
+    const timer = setInterval(async () => {
+      const row = await merchant.getTransaction(creditConfirmation.reference).catch(() => null);
+      if (!row) return;
+      if (row.creditConfirmationStatus) {
+        setCreditState(row.creditConfirmationStatus === 'RECEIVED' ? 'received' : 'unable');
+        clearInterval(timer);
+      } else if (row.isCreditConfirmationSupported === true) {
+        setCreditState((current) => current ?? 'waiting');
+      }
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [creditConfirmation]);
 
   const goHome = useCallback(() => navigation.popToTop(), [navigation]);
 
@@ -118,6 +163,28 @@ export function PaymentResultScreen({
           </View>
         )}
 
+        {creditState && (
+          <Text
+            style={[
+              styles.creditLine,
+              {
+                color:
+                  creditState === 'waiting'
+                    ? theme.warningOrange
+                    : creditState === 'received'
+                      ? theme.successGreen
+                      : theme.errorRed,
+              },
+            ]}
+          >
+            {creditState === 'waiting'
+              ? 'Confirming credit with merchant bank…'
+              : creditState === 'received'
+                ? 'Funds received by merchant bank'
+                : 'Bank credit could not be confirmed'}
+          </Text>
+        )}
+
         {!!receiptFor && (
           <Button
             title="View Receipt"
@@ -144,5 +211,6 @@ const styles = StyleSheet.create({
   message: { color: theme.textSecondary, fontSize: 14, marginTop: 8, textAlign: 'center' },
   amount: { color: theme.textPrimary, fontSize: 40, fontWeight: '700', marginTop: 24 },
   details: { marginTop: 24, alignItems: 'center' },
+  creditLine: { fontSize: 14, marginTop: 16, textAlign: 'center' },
   detailLine: { color: theme.textSecondary, fontSize: 13, marginTop: 2, textAlign: 'center' },
 });

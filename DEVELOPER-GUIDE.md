@@ -368,22 +368,46 @@ Has the merchant's bank actually **received the funds** of an approved sale? Set
 confirmation only — it never changes the sale's payment outcome.
 
 - `MerchantTransaction` carries `creditTransactionId` (the credit's identifier, `null`
-  unless the sale was approved and the merchant's bank supports confirmation) and
+  unless the sale was approved and the merchant's bank supports confirmation),
+  `isCreditConfirmationSupported` (`true` ⇒ the SDK is polling the confirmation rail for
+  this sale; on a merchant-QR row it can be `null` for a few seconds after the settle
+  while the SDK learns it from the transaction-status rail — the merchant-QR settle
+  itself carries no credit fields) and
   `creditConfirmationStatus` — `"RECEIVED"` once the funds are confirmed,
   `"UNABLE_TO_CONFIRM"` only as the final give-up after 30 days, and `null` while
   unconfirmed. Render `null` as nothing (or "not confirmed yet"), never as "not
   received".
+- An approved tap `MerchantTapResult` and an approved `CustomerQrChargeOutcome` carry
+  `creditTransactionId` + `isCreditConfirmationSupported` directly — the result screen's
+  cue to wait.
 - `merchant.onCreditConfirmation(listener)` — fires with a `CreditConfirmationEvent`
   (`merchantTransactionReference`, `creditTransactionId`, `status`, `amountMinorUnits`,
   `bankReference`, `creditedAt`) when a sale's funds are confirmed, or once with
-  `"UNABLE_TO_CONFIRM"` when the 30-day window closes. Subscribe once at start-up and
-  match by `merchantTransactionReference` — it can fire for a sale from an earlier
+  `"UNABLE_TO_CONFIRM"` when the 30-day window closes. It covers sales on **every rail**
+  (tap, customer-QR charge, merchant-presented QR) — the sweep works off the stored rows.
+  Match by `merchantTransactionReference` — it can fire for a sale from an earlier
   session. The SDK owns the polling (exponential backoff); the app just reacts.
 
-**Platform note:** the background credit-confirmation poll exists on the Android side
-only — on iOS the native SDK exposes a manual fetch instead, so this event **fires on
-Android only** today. Shared JS may subscribe unconditionally; on iOS it simply never
-fires.
+**Recommended pattern — the result screen renders the stored row** (see the sample's
+`PaymentResultScreen`): when an approved outcome says the merchant's bank supports
+confirmation, show "Confirming credit with merchant bank…" on the result screen, flip it
+from `onCreditConfirmation` (Android) — "Funds received by merchant bank" on `RECEIVED`,
+"Bank credit could not be confirmed" only on the final give-up — and also re-read
+`merchant.getTransaction(ref)` every few seconds while visible, so the same flip works
+from the stored `creditConfirmationStatus` (the iOS path, and the merchant-QR path where
+the settle can't carry the supported flag and the SDK learns it moments later).
+
+**The polling is SDK-owned and app-scoped, never screen-scoped**: leaving the result
+screen changes nothing — the SDK keeps polling while the app runs, persists the answer
+onto the stored row, and screens that re-read the store on focus (as the sample's
+transactions screen does) show the updated state on return.
+
+**Platform note:** every merchant rail supports credit confirmation, and the SDK polls on
+every platform (on iOS the sweep runs while the app is alive — no OS background
+execution; it suspends and resumes with the app; iOS also has no tap rail). The
+asymmetry is only in the *event*: it **fires on Android only** today — shared JS may
+subscribe unconditionally (on iOS it simply never fires) and rely on the stored row for
+the flip, as the sample does.
 
 ## 8. Events
 

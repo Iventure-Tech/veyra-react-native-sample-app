@@ -28,6 +28,21 @@ export interface PaymentResultParams {
    * receipt to fetch in either case.
    */
   receiptFor?: string;
+  /**
+   * Present when an approved sale may be waiting on beneficiary credit confirmation — the
+   * result screen then shows "Confirming credit with merchant bank…" and flips it when the
+   * SDK's `merchant.onCreditConfirmation` event (fired from its background poll) reports the
+   * funds landed. `supported: true` means the outcome itself carried the flag (tap, customer
+   * QR) — wait immediately. `supported: null` means the rail's settle cannot carry it (a
+   * merchant-presented QR: the contexts endpoint has no credit fields, the SDK learns them
+   * from the transaction-status rail moments later) — the screen watches the SDK's stored row
+   * and starts waiting once the flag turns up true.
+   */
+  creditConfirmation?: {
+    reference: string;
+    creditTransactionId: string | null;
+    supported: boolean | null;
+  };
 }
 
 /** How long a result stays up before returning Home by itself (native samples: 5s). */
@@ -68,6 +83,16 @@ export function tapResultToParams(
         reference && `Reference: ${reference}`
       ),
       receiptFor: reference,
+      // The approval said the merchant's bank supports credit confirmation — the result
+      // screen waits and flips from the onCreditConfirmation event.
+      creditConfirmation:
+        result.isCreditConfirmationSupported === true && reference
+          ? {
+              reference,
+              creditTransactionId: result.creditTransactionId,
+              supported: true,
+            }
+          : undefined,
     };
   }
 
@@ -108,6 +133,12 @@ export function contextSettlementToParams(
     amountMinorUnits,
     details: lines(`Ref: ${status.txRef}`, `Response: ${status.responseCode ?? '-'}`),
     receiptFor: status.isApproved ? status.txRef : undefined,
+    // The context settle carries no credit fields — `supported: null` makes the result
+    // screen watch the SDK's stored row (which learns them from the transaction-status
+    // rail moments after the settle) and wait once the flag turns up true.
+    creditConfirmation: status.isApproved
+      ? { reference: status.txRef, creditTransactionId: null, supported: null }
+      : undefined,
   };
 }
 
@@ -131,6 +162,14 @@ export function cpmChargeToParams(
       reference && `Reference: ${reference}`
     ),
     receiptFor: reference,
+    creditConfirmation:
+      outcome.approved && outcome.isCreditConfirmationSupported === true && reference
+        ? {
+            reference,
+            creditTransactionId: outcome.creditTransactionId,
+            supported: true,
+          }
+        : undefined,
   };
 }
 

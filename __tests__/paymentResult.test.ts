@@ -29,6 +29,8 @@ const tap = (over: Partial<MerchantTapResult> = {}): MerchantTapResult => ({
   merchantTransactionReference: null,
   transactionId: null,
   merchantStatus: null,
+  creditTransactionId: null,
+  isCreditConfirmationSupported: null,
   ...over,
 });
 
@@ -50,6 +52,39 @@ describe('tapResultToParams', () => {
     expect(params.amountMinorUnits).toBe(250_00);
     expect(params.receiptFor).toBe('REF-1');
     expect(params.details).toEqual(['Card: AFRIGO', 'Reference: REF-1']);
+    // No supported flag ⇒ nothing to wait for on the result screen.
+    expect(params.creditConfirmation).toBeUndefined();
+  });
+
+  it('waits on credit confirmation when the approval says the bank supports it', () => {
+    const params = tapResultToParams(
+      tap({
+        responseCode: '00',
+        status: 'APPROVED',
+        merchantTransactionReference: 'REF-1',
+        creditTransactionId: 'CREDIT-1',
+        isCreditConfirmationSupported: true,
+      }),
+      250_00
+    );
+    expect(params.creditConfirmation).toEqual({
+      reference: 'REF-1',
+      creditTransactionId: 'CREDIT-1',
+      supported: true,
+    });
+  });
+
+  it('never waits on a non-approved outcome, whatever the flags claim', () => {
+    const params = tapResultToParams(
+      tap({
+        responseCode: '05',
+        status: 'DECLINED',
+        merchantTransactionReference: 'REF-1',
+        isCreditConfirmationSupported: true,
+      }),
+      100
+    );
+    expect(params.creditConfirmation).toBeUndefined();
   });
 
   it('treats 99 as pending and offers NO receipt — the status can still change', () => {
@@ -108,6 +143,13 @@ describe('contextSettlementToParams', () => {
     expect(params.outcome).toBe('approved');
     expect(params.receiptFor).toBe('TX-1');
     expect(params.details).toEqual(['Ref: TX-1', 'Response: 00']);
+    // The contexts rail carries no credit fields: supported is unknown (null), so the
+    // result screen watches the stored row rather than waiting outright.
+    expect(params.creditConfirmation).toEqual({
+      reference: 'TX-1',
+      creditTransactionId: null,
+      supported: null,
+    });
   });
 
   it('declines without a receipt when the push settled unapproved', () => {
@@ -117,6 +159,7 @@ describe('contextSettlementToParams', () => {
     );
     expect(params.outcome).toBe('declined');
     expect(params.receiptFor).toBeUndefined();
+    expect(params.creditConfirmation).toBeUndefined();
   });
 
   it('shows a dash rather than "null" when the gateway sent no response code', () => {
@@ -132,7 +175,21 @@ describe('cpmChargeToParams', () => {
     responseCode: '00',
     transactionId: 'TXN-9',
     merchantTransactionReference: 'REF-9',
+    creditTransactionId: null,
+    isCreditConfirmationSupported: null,
     ...over,
+  });
+
+  it('waits on credit confirmation when the approved charge says the bank supports it', () => {
+    const params = cpmChargeToParams(
+      charge({ creditTransactionId: 'CREDIT-9', isCreditConfirmationSupported: true }),
+      750
+    );
+    expect(params.creditConfirmation).toEqual({
+      reference: 'REF-9',
+      creditTransactionId: 'CREDIT-9',
+      supported: true,
+    });
   });
 
   it('offers the receipt for a delivered decline too — it was recorded', () => {

@@ -103,6 +103,20 @@ export function GetPaidScreen({
     return () => sub.remove();
   }, [navigation]);
 
+  // Beneficiary credit confirmation: the SDK polls the merchant's bank after an approved sale
+  // (when the payment response said confirmation is supported) and pushes the answer here —
+  // possibly minutes later. Settlement news only, never a change to the payment outcome.
+  // Android only: on iOS there is no background poller, so this never fires there.
+  useEffect(() => {
+    const sub = merchant.onCreditConfirmation((e) => {
+      Alert.alert(
+        e.status === 'RECEIVED' ? 'Funds received by merchant bank' : 'Bank credit could not be confirmed',
+        `Sale ${e.merchantTransactionReference}`
+      );
+    });
+    return () => sub.remove();
+  }, []);
+
   // An expired get-paid QR must stop being shown — it is no longer chargeable.
   useEffect(() => {
     const sub = merchant.onQrExpired(() => {

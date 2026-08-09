@@ -362,6 +362,29 @@ presented it (EMV tag `5F20`); on a Veyra token that is the card's display name,
 `AFRIGO ****1234`, not a person's name. It is `null` on QR-MPM payments (the merchant
 never reads the card) and on transactions recorded by older SDK versions.
 
+### 7.5 Beneficiary credit confirmation
+
+Has the merchant's bank actually **received the funds** of an approved sale? Settlement
+confirmation only — it never changes the sale's payment outcome.
+
+- `MerchantTransaction` carries `creditTransactionId` (the credit's identifier, `null`
+  unless the sale was approved and the merchant's bank supports confirmation) and
+  `creditConfirmationStatus` — `"RECEIVED"` once the funds are confirmed,
+  `"UNABLE_TO_CONFIRM"` only as the final give-up after 30 days, and `null` while
+  unconfirmed. Render `null` as nothing (or "not confirmed yet"), never as "not
+  received".
+- `merchant.onCreditConfirmation(listener)` — fires with a `CreditConfirmationEvent`
+  (`merchantTransactionReference`, `creditTransactionId`, `status`, `amountMinorUnits`,
+  `bankReference`, `creditedAt`) when a sale's funds are confirmed, or once with
+  `"UNABLE_TO_CONFIRM"` when the 30-day window closes. Subscribe once at start-up and
+  match by `merchantTransactionReference` — it can fire for a sale from an earlier
+  session. The SDK owns the polling (exponential backoff); the app just reacts.
+
+**Platform note:** the background credit-confirmation poll exists on the Android side
+only — on iOS the native SDK exposes a manual fetch instead, so this event **fires on
+Android only** today. Shared JS may subscribe unconditionally; on iOS it simply never
+fires.
+
 ## 8. Events
 
 One `NativeEventEmitter` channel per family; subscribe via the typed helpers and
@@ -373,6 +396,7 @@ One `NativeEventEmitter` channel per family; subscribe via the typed helpers and
 | `wallet.onTapEvent` (Android) | `transactionStarted` / `transactionCompleted` / `activationFailed` |
 | `merchant.tap.onEvent` | `cardDetected` / `cardContactLost` / `unsupportedCard` / progress / `ended` / `result` |
 | `wallet.onQrExpired` / `merchant.onQrExpired` | one `expired` per rendered QR |
+| `merchant.onCreditConfirmation` | one terminal credit confirmation per sale — `RECEIVED`, or the final 30-day `UNABLE_TO_CONFIRM` (Android only; see §7.5) |
 
 ## 9. Errors
 

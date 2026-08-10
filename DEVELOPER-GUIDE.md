@@ -311,8 +311,11 @@ Only `result` (and iOS `ended`) are terminal. `cardContactLost` / `unsupportedCa
 mean the reader **stays armed for a re-tap** — show a transient hint ("Hold steady" /
 "Card not supported — try another card") and keep the waiting screen up, exactly like a
 physical terminal. `merchant.tap.cancel(sessionId)` cancels an armed, untapped payment.
-Progress events `readingComplete` / `sendingOnline` / `receivingOnline` are
-Android-only; `ended` is iOS-only.
+Progress events `cardContactLost` / `readingComplete` / `sendingOnline` /
+`receivingOnline` fire on **both** platforms (they were Android-only in earlier releases);
+`ended` is iOS-only, and reports a reader session that ended *without* a card. Nothing
+talks to the card after `readingComplete` — that is the moment to tell the merchant the
+tap is over, while the bank is still being contacted.
 
 `result.responseCode`: `'00'` approved · `'05'` declined · `'06'` failed before the
 issuer (incl. cancellation) · `'99'` pending — do **not** re-charge · `'91'` issuer
@@ -392,7 +395,7 @@ confirmation only — it never changes the sale's payment outcome.
 **Recommended pattern — the result screen renders the stored row** (see the sample's
 `PaymentResultScreen`): when an approved outcome says the merchant's bank supports
 confirmation, show "Confirming credit with merchant bank…" on the result screen, flip it
-from `onCreditConfirmation` (Android) — "Funds received by merchant bank" on `RECEIVED`,
+from `onCreditConfirmation` — "Funds received by merchant bank" on `RECEIVED`,
 "Bank credit could not be confirmed" only on the final give-up — and also re-read
 `merchant.getTransaction(ref)` every few seconds while visible, so the same flip works
 from the stored `creditConfirmationStatus` (the iOS path, and the merchant-QR path where
@@ -403,12 +406,13 @@ screen changes nothing — the SDK keeps polling while the app runs, persists th
 onto the stored row, and screens that re-read the store on focus (as the sample's
 transactions screen does) show the updated state on return.
 
-**Platform note:** every merchant rail supports credit confirmation, and the SDK polls on
-every platform (on iOS the sweep runs while the app is alive — no OS background
-execution; it suspends and resumes with the app; iOS also has no tap rail). The
-asymmetry is only in the *event*: it **fires on Android only** today — shared JS may
-subscribe unconditionally (on iOS it simply never fires) and rely on the stored row for
-the flip, as the sample does.
+**Platform note:** every merchant rail supports credit confirmation, the SDK polls on
+every platform, and **the event now fires on both** — the iOS bridge forwards the same
+native channel Android does, with the same name and payload, so shared JS needs no
+platform branch. (On iOS the sweep runs while the app is alive — no OS background
+execution; it suspends and resumes with the app; iOS also has no tap rail.) Keep the
+stored-row read anyway: the event does not replay, so a screen opened after the answer
+landed learns it from `merchant.getTransaction(ref)`, as the sample does.
 
 **Holding the result screen (your app's decision, never the SDK's).** A terminal outcome is
 a destination, not a notification. `PaymentResultScreen` holds every terminal result —
@@ -432,10 +436,11 @@ One `NativeEventEmitter` channel per family; subscribe via the typed helpers and
 | Helper | Events |
 |---|---|
 | `wallet.onActivationEvent` | `activated` / `timeout` / `error` |
-| `wallet.onTapEvent` (Android) | `transactionStarted` / `transactionCompleted` / `activationFailed` |
+| `wallet.onTapEvent` | `transactionStarted` / `transactionCompleted` / `activationFailed` (Android tap rail), plus the `requireOnline` / `amountExceedCardLimit` refusals, which also fire from the QR rails on iOS |
 | `merchant.tap.onEvent` | `cardDetected` / `cardContactLost` / `unsupportedCard` / progress / `ended` / `result` |
 | `wallet.onQrExpired` / `merchant.onQrExpired` | one `expired` per rendered QR |
-| `merchant.onCreditConfirmation` | one terminal credit confirmation per sale — `RECEIVED`, or the final 30-day `UNABLE_TO_CONFIRM` (Android only; see §7.5) |
+| `merchant.onTransactionResolved` | one settlement per pending sale — `APPROVED` / `DECLINED` / `FAILED`, never `PENDING` (see §10) |
+| `merchant.onCreditConfirmation` | one terminal credit confirmation per sale — `RECEIVED`, or the final 30-day `UNABLE_TO_CONFIRM` (see §7.5) |
 
 ## 9. Errors
 
@@ -518,30 +523,39 @@ reconciliation has stopped and a human will settle the payment. Stop any tight l
 the merchant "we're looking into this", and re-check lazily — next app open, or a long backoff. It will
 still resolve; it just will not resolve in seconds.
 
-#### `onTransactionResolved` — the SDK pushes the answer
+#### `merchant.onTransactionResolved` — the SDK pushes the answer
 
-```js
-import { DeviceEventEmitter } from 'react-native';
+```ts
+import { merchant, type TransactionResolvedEvent } from 'veyra-sdk-react-native';
 
-DeviceEventEmitter.addListener('VeyraTransactionResolvedEvent', (r) => {
+const sub = merchant.onTransactionResolved((r: TransactionResolvedEvent) => {
   // r.merchantTransactionReference — which payment
-  // r.status — APPROVED / DECLINED / FAILED (never PENDING)
-  // r.reason — e.g. INSUFFICIENT_FUNDS
+  // r.status — 'APPROVED' / 'DECLINED' / 'FAILED' (never 'PENDING')
+  // r.reason — e.g. 'INSUFFICIENT_FUNDS'
   // r.responseCode — the wire literal, for receipts and support
 });
+// …and on unmount:
+sub.remove();
 ```
 
-Four things worth knowing before you rely on it:
+Five things worth knowing before you rely on it:
 
 - **Subscribe once, at start-up** — not per payment. It fires for *any* transaction that resolves,
   including one started in an earlier app session and settled by a later poll. That is the case that
   matters most: a tap that resolves after your app was backgrounded or killed.
+- **It fires identically on Android and iOS** — same event, same payload. (In earlier releases it was
+  emitted natively on Android only and had no TypeScript binding at all, reachable solely through a raw
+  `DeviceEventEmitter`; that is what the typed subscriber above replaces.)
 - **It does not replay.** If your app was not running when the row settled, nothing is queued for you —
-  read `getLastTransactions()` at start-up. The observer is a convenience over the store, not a delivery
-  guarantee, so keep the read path.
-- **The payment callback still fires exactly once**, possibly with `PENDING`. The resolution arrives on
+  read `merchant.getTransactions()` at start-up. The event is a convenience over the store, not a
+  delivery guarantee, so keep the read path (the sample's `PaymentResultScreen` does both: it reads the
+  row once on mount and subscribes for the live case).
+- **The payment result still arrives exactly once**, possibly with `'PENDING'`. The resolution comes on
   this separate channel; the two are not alternatives.
-- The event is emitted on the JS thread, like every other Veyra event.
+- The event is emitted on the JS thread, like every other Veyra event. Underneath, the native
+  registration is single-listener — **last registration wins** — but the bridge owns that one
+  registration, so on the JS side you may add and remove as many `addListener` subscriptions as you
+  like.
 
 #### When the SDK could not start a payment at all
 

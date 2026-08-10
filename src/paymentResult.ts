@@ -29,6 +29,13 @@ export interface PaymentResultParams {
    */
   receiptFor?: string;
   /**
+   * Merchant transaction reference of a sale that is **not final yet**. The result screen
+   * subscribes to `merchant.onTransactionResolved` for it (and reads the stored row on mount,
+   * for the answer that landed before the screen opened) and shows the settled outcome in
+   * place, so the merchant is not left staring at "Pending" until they navigate away.
+   */
+  resolvesFor?: string;
+  /**
    * Present when an approved sale may be waiting on beneficiary credit confirmation — the
    * result screen then shows "Confirming credit with merchant bank…" and flips it when the
    * SDK's `merchant.onCreditConfirmation` event (fired from its background poll) reports the
@@ -111,7 +118,9 @@ export function tapResultToParams(
       message: result.message ?? PENDING_MESSAGE,
       amountMinorUnits,
       details: lines(PENDING_MESSAGE, reference && `Reference: ${reference}`),
-      // No receipt: the transaction is not final, so there is nothing to print yet.
+      // No receipt: the transaction is not final, so there is nothing to print yet. The SDK
+      // keeps polling it and pushes the settlement — the screen watches this reference.
+      resolvesFor: reference,
     };
   }
 

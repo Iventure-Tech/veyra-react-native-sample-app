@@ -42,9 +42,42 @@ export function PaymentResultScreen({
   navigation,
   route,
 }: NativeStackScreenProps<RootStackParamList, 'PaymentResult'>): React.JSX.Element {
-  const { outcome, title, message, amountMinorUnits, details, receiptFor, creditConfirmation } =
-    route.params;
+  const {
+    outcome,
+    title,
+    message,
+    amountMinorUnits,
+    details,
+    receiptFor,
+    resolvesFor,
+    creditConfirmation,
+  } = route.params;
   const look = LOOK[outcome];
+
+  // A PENDING sale is a question, not an answer: the SDK keeps polling it and pushes the
+  // settlement on `onTransactionResolved`. The event is a notification, never the source of
+  // truth — it does not replay, so the stored row is read once on mount for the answer that
+  // landed before this screen opened. Both halves stay; neither is redundant.
+  const [resolved, setResolved] = useState<{ status: string; reason: string | null } | null>(null);
+  useEffect(() => {
+    if (!resolvesFor) return;
+    let cancelled = false;
+    merchant
+      .getTransaction(resolvesFor)
+      .then((row) => {
+        if (cancelled || !row?.status || row.status === 'PENDING') return;
+        setResolved({ status: row.status, reason: row.responseStatusReason ?? null });
+      })
+      .catch(() => {});
+    const sub = merchant.onTransactionResolved((e) => {
+      if (e.merchantTransactionReference !== resolvesFor) return;
+      setResolved({ status: e.status, reason: e.reason });
+    });
+    return () => {
+      cancelled = true;
+      sub.remove();
+    };
+  }, [resolvesFor]);
 
   // Beneficiary credit confirmation: an approved sale whose merchant bank supports it shows a
   // waiting line here and flips it when the SDK's background poll confirms the funds landed
@@ -172,6 +205,24 @@ export function PaymentResultScreen({
               </Text>
             ))}
           </View>
+        )}
+
+        {resolved && (
+          <Text
+            style={[
+              styles.creditLine,
+              {
+                color:
+                  resolved.status === 'APPROVED'
+                    ? theme.successGreen
+                    : resolved.status === 'DECLINED'
+                      ? theme.errorRed
+                      : theme.warningOrange,
+              },
+            ]}
+          >
+            {`Settled: ${resolved.status}${resolved.reason ? ` · ${resolved.reason}` : ''}`}
+          </Text>
         )}
 
         {creditState && (

@@ -60,6 +60,7 @@ catalogue — lives in this repository.
    ```
 
    ```bash
+   npm start
    npm run android
    ```
 

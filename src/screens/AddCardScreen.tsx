@@ -3,6 +3,7 @@ import { Alert, Pressable, StyleSheet, Text } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
   wallet,
+  VeyraError,
   type ActivationMethodInfo,
   type Bank,
 } from 'veyra-sdk-react-native';
@@ -30,7 +31,17 @@ export function AddCardScreen({
   const observedRef = useRef<string | null>(null);
 
   useEffect(() => {
-    wallet.getBanks().then(setBanks).catch(() => {});
+    wallet
+      .getBanks()
+      .then(setBanks)
+      .catch((e) => {
+        // An offline device is the one failure worth interrupting for: the bank picker will
+        // stay empty until the user reconnects, and nothing on this screen tells them that.
+        // Everything else stays silent — the user can still type the institution code.
+        if ((e as VeyraError).code === 'NO_NETWORK_CONNECTION') {
+          Alert.alert('No internet connection', 'Reconnect and reopen this screen to load banks.');
+        }
+      });
   }, []);
 
   useEffect(() => {

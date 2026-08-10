@@ -305,6 +305,62 @@ PENDING rows), `processReceipt(qrPayload, expectedHash?)` to verify-and-store a 
 merchant receipt, `getReceipts(limit?)`, `getReceiptForTransaction(hash)`.
 `entryMethod` is `'TAP' | 'QR_GENERATED' | 'QR_SCANNED'`.
 
+**How the SDK waits for a `PENDING` row** (wallet and merchant alike). You do not have to
+poll, schedule anything, or keep a screen open — the native SDK under the bridge asks on its
+own with **exponential backoff**: the first re-checks come within seconds (most payments
+settle at once) and the interval doubles to a steady state of roughly **once an hour**. It
+keeps that up for **30 days** from the transaction date, then stops asking.
+
+**Stopping is not an outcome.** At 30 days the row keeps whatever status it has — still
+`'PENDING'`, which is still true — and simply leaves the poll list. The SDK never writes
+`'FAILED'`, `'DECLINED'` or any verdict of its own; only the backend decides what a payment
+was. Treat a long-`'PENDING'` row as *unresolved*, not failed, however old it is.
+`reconcilePendingTransactions()` still works past the window, and unlike the scheduled sweep
+it ignores the backoff — an explicit ask always reaches the backend.
+
+### 6.6 Merchant credit confirmation (wallet side)
+
+Did the money actually reach the merchant's bank? The wallet asks the same question the
+merchant SDK asks about that sale, from the payer's side — **settlement confirmation only**,
+it never changes or restates the payment outcome.
+
+**The SDK does the polling; your screen renders the stored row.** Once a payment is
+approved, the native SDK asks the gateway on an exponential backoff for up to **30 days**,
+app-scoped: it keeps going across every screen and no screen starts or stops it. Unlike the
+merchant side there is deliberately **no `onCreditConfirmation` event on the wallet** — the
+stored row is the whole surface. Read it when a detail screen opens, and re-read
+`getTransactions(ref)` every few seconds while it is open if you want the line to flip live
+(see the sample's `WalletTransactionsScreen`).
+
+`TransactionSummary` carries five fields for it:
+
+| Field | What it means for you |
+|---|---|
+| `isCreditConfirmationSupported: boolean \| null` | **The gate.** `true` ⇒ the merchant's bank is on the confirmation rail, the SDK is polling, and you should render the credit line. `false`/`null` ⇒ there is nothing to ask — render **no** credit UI for that transaction. |
+| `creditConfirmationStatus: string \| null` | `null` = no answer yet (with the gate `true`, that is the "confirming…" state) · `'RECEIVED'` = terminal, the funds are confirmed in the merchant's account · `'UNABLE_TO_CONFIRM'` = the 30-day sweep stopped asking. |
+| `creditTransactionId: string \| null` | The credit leg's id — display/support only; never pass it back to the SDK. |
+| `creditedAt: string \| null` | When the beneficiary bank posted the credit. `'RECEIVED'` only. |
+| `bankReference: string \| null` | The beneficiary bank's own reference for the credit. `'RECEIVED'` only. |
+
+Two things to get right, because they are easy to get wrong in the user's favour and wrong
+in fact:
+
+- **`'UNABLE_TO_CONFIRM'` does not mean the merchant was not paid.** It means we stopped
+  asking after 30 days. Word it as "could not confirm", never as "not received".
+- **No credit line at all is a normal state**, not an error: the transaction is not on the
+  rail (an older row, a bank that does not support confirmation, or a payment that was not
+  approved). Absence means "we cannot ask".
+
+**Platform note:** the wallet rail works the same on both platforms and the fields are
+identical; only the cadence differs. On Android the sweep rides WorkManager, whose floor is
+15 minutes, with a one-shot chain immediately after a payment resolves; on iOS it is an
+app-scoped loop that runs while the app is alive (no OS background execution) and resumes
+with the app. Neither loses an answer — the state lives in the SDK's store.
+
+A failed poll — device offline, gateway unreachable, an unreadable answer — changes nothing:
+the SDK backs off and asks again, leaving the row exactly as it was. "We could not reach the
+server" is never recorded as "the payment failed".
+
 ## 7. Merchant (Get paid) API
 
 ### 7.1 Registration & profile
@@ -475,6 +531,7 @@ Every rejection is a `VeyraError` with a stable `code` — never string-match me
 | `NOT_CONFIGURED` | call `Veyra.initialize` first |
 | `SESSION_REQUIRED` | mount `usePaySession` / `useGetPaidSession` on the payment screen |
 | `MODE_REFUSED` | the other experience's payment is mid-flight; retry after it completes |
+| `NO_NETWORK_CONNECTION` | **the device** has no working internet connection — ask the user to connect and retry. Nothing was sent, so nothing needs undoing. Raised by every backend call in both experiences (wallet: get banks, verify account, digitise, request activation code, activate, token status; merchant: register, refresh/activate/deactivate/update merchant, create payment context, take a payment) |
 | `ONLINE_REQUIRED` | card needs the device online; grey it out, SDK self-heals |
 | `TOKEN_NOT_ACTIVE` | card blocked server-side |
 | `CDCVM_REQUIRED` | call `authenticateForPayment` first |
@@ -483,6 +540,18 @@ Every rejection is a `VeyraError` with a stable `code` — never string-match me
 | `UNSUPPORTED_ON_PLATFORM` | e.g. wallet tap-to-pay on iOS |
 | `VALIDATION` (`field`) | fix the named parameter |
 | `MISSING_MANDATORY_CONFIG` / `REQUEST_FAILED` / `UNKNOWN` | configuration / backend / other |
+
+**`NO_NETWORK_CONNECTION` vs `ONLINE_REQUIRED` vs `91`.** All three end with "get online" and they
+are not the same thing — treat them alike and you will either grey out a perfectly good card or
+promise a refresh that cannot happen:
+
+- **`NO_NETWORK_CONNECTION`** — the *device* has no connection. Every call fails the same way and
+  nothing recovers until the user reconnects. Retrying is safe: nothing was sent.
+- **`ONLINE_REQUIRED`** — the *card* has run out of payment keys. The device is usually online
+  already; the SDK refreshes the card itself, typically within seconds. A card state, not a network
+  state.
+- **`91` / `ISSUER_SWITCH_NOT_AVAILABLE`** — the device reached the network and the gateway refused
+  the connection. Safe to retry, but the user's connection is not the problem.
 
 ## 10. Platform availability at a glance
 
@@ -494,6 +563,16 @@ Every rejection is a `VeyraError` with a stable `code` — never string-match me
 | Merchant registration + QR rails | ✅ | ✅ |
 | Receipt QR | PNG (`qrCodeBase64`) | payload (`qrPayload`) |
 | `appleTeamId` | — | required |
+| Pending-outcome polling (backoff, 30-day stop) | ✅ | ✅ |
+| …but its lifetime | runs in the background via WorkManager | **app-scoped only** — no OS background execution |
+
+**What "app-scoped" means on iOS.** The pending-outcome sweep starts when the SDK is
+configured and keeps running across every in-app navigation, whatever screen is up. But iOS
+suspends timers when the OS suspends the app, so the sweep pauses when the app is
+backgrounded and resumes when it returns to the foreground; Android's WorkManager sweep is
+not so bound. This costs *time*, never an answer — every result is written to the store, so
+a row that resolves while the app is away is simply resolved the next time you read it, and
+the 30-day window is measured from the transaction date rather than from time spent polling.
 
 ## 11. Troubleshooting
 

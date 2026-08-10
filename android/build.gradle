@@ -26,6 +26,7 @@ apply plugin: "com.facebook.react.rootproject"
 // co.veyra:* artifacts transitively through the wrapper.
 allprojects {
     repositories {
+        mavenLocal() // VEYRA-LOCAL-LINK
         maven {
             name = "veyra"
             url = "https://repo.veyra.co/releases"

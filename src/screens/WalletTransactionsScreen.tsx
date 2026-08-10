@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -13,6 +13,32 @@ import { theme } from '../theme';
 import { Scanner } from '../Scanner';
 import { ReceiptDetail } from './WalletReceiptsScreen';
 import { Busy, Button, formatAmount } from '../ui';
+
+/**
+ * The merchant-credited line. Only ever rendered with `isCreditConfirmationSupported === true`,
+ * so a null status means "no answer yet" — the in-flight state — and never "not received". The
+ * 30-day give-up says "could not confirm" for exactly the same reason.
+ */
+function creditText(status: string | null): string {
+  if (status === 'RECEIVED') return "Merchant's bank has received the funds";
+  if (status === 'UNABLE_TO_CONFIRM') return "Could not confirm the merchant's bank received the funds";
+  return "Confirming the merchant's bank has received the funds…";
+}
+
+function creditColor(status: string | null): { color: string } {
+  if (status === 'RECEIVED') return { color: '#4CAF50' };
+  if (status === 'UNABLE_TO_CONFIRM') return { color: theme.textSecondary };
+  return { color: '#FFA726' };
+}
+
+/** The bank's own description of the credit — present on RECEIVED only. */
+function creditDetail(t: TransactionSummary): string | null {
+  const parts = [
+    t.creditedAt,
+    t.bankReference ? `Bank reference: ${t.bankReference}` : null,
+  ].filter((p): p is string => !!p);
+  return parts.length ? parts.join(' · ') : null;
+}
 
 /**
  * Wallet history: rows open a transaction detail with its receipt — or a scanner to
@@ -40,6 +66,30 @@ export function WalletTransactionsScreen({
         .catch(() => setRows([]));
     }, [tokenUniqueReference])
   );
+
+  // The merchant-credit answer can land while the detail view is open. This is a **store read**
+  // on a timer, not a poll: the SDK owns the asking (app-scoped, exponential backoff, up to 30
+  // days) and keeps going whether or not this screen exists — so clearing the interval when the
+  // detail closes ends a UI refresh and never a wait. Stops once the answer is terminal.
+  useEffect(() => {
+    if (!detail || detail.isCreditConfirmationSupported !== true) return;
+    if (detail.creditConfirmationStatus !== null) return;
+    const hash = detail.transactionHash;
+    if (!hash) return;
+    const id = setInterval(() => {
+      wallet
+        .getTransactions(tokenUniqueReference)
+        .then((fresh) => {
+          const match = fresh.find((r) => r.transactionHash === hash);
+          if (match) {
+            setRows(fresh);
+            setDetail(match);
+          }
+        })
+        .catch(() => {});
+    }, 3000);
+    return () => clearInterval(id);
+  }, [detail, tokenUniqueReference]);
 
   const openReceipt = async (hash: string) => {
     const r = await wallet.getReceiptForTransaction(hash).catch(() => null);
@@ -97,6 +147,21 @@ export function WalletTransactionsScreen({
                 <Text style={styles.merchant}>{v}</Text>
               </View>
             ))}
+          {/*
+            The merchant-credited indicator. `isCreditConfirmationSupported` is the whole gate:
+            false/null means the rail does not exist for this payment, so nothing is rendered at
+            all — absence means "we cannot ask", never "the merchant was not paid". A null status
+            with the flag true is the in-flight state, which is why the give-up wording is "could
+            not confirm" rather than anything stronger.
+          */}
+          {t.isCreditConfirmationSupported === true ? (
+            <View style={styles.creditBlock}>
+              <Text style={[styles.credit, creditColor(t.creditConfirmationStatus)]}>
+                {creditText(t.creditConfirmationStatus)}
+              </Text>
+              {creditDetail(t) ? <Text style={styles.meta}>{creditDetail(t)}</Text> : null}
+            </View>
+          ) : null}
           {t.transactionHash ? (
             <>
               <Button title="View receipt" onPress={() => openReceipt(t.transactionHash!)} />
@@ -156,4 +221,6 @@ const styles = StyleSheet.create({
   merchant: { fontWeight: '600', color: theme.textPrimary, flexShrink: 1, textAlign: 'right' },
   amount: { fontWeight: '700', color: theme.textPrimary },
   meta: { color: theme.textSecondary, fontSize: 12, marginTop: 4 },
+  creditBlock: { marginTop: 8 },
+  credit: { fontSize: 13 },
 });

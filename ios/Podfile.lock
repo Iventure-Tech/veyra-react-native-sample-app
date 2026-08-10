@@ -2362,7 +2362,7 @@ PODS:
     - SocketRocket
     - Yoga
   - SocketRocket (0.7.1)
-  - veyra-sdk-react-native (1.0.11-SNAPSHOT):
+  - veyra-sdk-react-native (1.0.12-SNAPSHOT):
     - React-Core
   - Yoga (0.0.0)
 
@@ -2685,7 +2685,7 @@ SPEC CHECKSUMS:
   RNScreens: 75074e642b69b086813a943bdf63da7085fb2166
   RNSVG: e8fb86f41fccd7b67c4480bb9e179e0ad5785b80
   SocketRocket: d4aabe649be1e368d1318fdf28a022d714d65748
-  veyra-sdk-react-native: 7ee5feaec3acca2af89c84e421c53d2731884611
+  veyra-sdk-react-native: 3318af368ca052de030965eb33287d391940c87b
   Yoga: 1c52fbd270869e556504def7e94fffbf67f53f7b
 
 PODFILE CHECKSUM: b1cce391bd4f37f3dd3754c7a7dbd95a30db0a6b

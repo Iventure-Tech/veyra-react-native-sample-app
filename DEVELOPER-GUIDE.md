@@ -227,7 +227,11 @@ All methods return promises; all failures are typed `VeyraError`s.
 | `wallet.digitise(params)` | tokenise the account; `recommendation` is **your app's** risk decision — required, never defaulted |
 
 `digitise` resolves with `responseCode` `'APPROVED'` (ready), `'APPROVE_REQUIRE_AUTH'`
-(activation needed — `activationMethods` lists the OTP channels), or `'DECLINED'`.
+(activation needed — `activationMethods` lists the OTP channels), or `'DECLINED'`. Any other
+code — including none at all — means this SDK version cannot interpret the answer: the token is
+**discarded** (nothing provisioned, no card added, even if the response carried full token data)
+and the call fails with a message beginning `UNRECOGNISED_RESPONSE_CODE:`. Offer a retry, and
+update the SDK if it persists.
 iOS-only param: `bankName` (shown on the stored card). Android additionally requires
 `consumerIdentifier`, `bvn`, `accountHolderAddress`, `mobileNumber`.
 

@@ -41,6 +41,16 @@ function creditDetail(t: TransactionSummary): string | null {
 }
 
 /**
+ * Is this row still awaiting an outcome? A status this build does not recognise is open too — the
+ * SDK carries unknown values raw, and an unresolved row must not read as settled just because we
+ * cannot name its status. `null`/absent means the backend stated nothing, which is also open.
+ */
+function isOpen(t: TransactionSummary | null | undefined): boolean {
+  const stated = (t?.authorizationStatus ?? '').trim().toUpperCase();
+  return !['APPROVED', 'DECLINED', 'FAILED'].includes(stated);
+}
+
+/**
  * Wallet history: rows open a transaction detail with its receipt — or a scanner to
  * capture the merchant's receipt QR **bound to this transaction** (the SDK rejects a
  * receipt whose hash doesn't match).
@@ -54,6 +64,76 @@ export function WalletTransactionsScreen({
   const [receipt, setReceipt] = useState<TransactionReceipt | null>(null);
   const [scanningFor, setScanningFor] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // In-flight state for the manual "check status" ask, and its transient note.
+  const [checkingStatus, setCheckingStatus] = useState(false);
+  const [statusNote, setStatusNote] = useState<string | null>(null);
+  // In-flight state for the manual "check merchant credit" ask, and its transient note.
+  const [checkingCredit, setCheckingCredit] = useState(false);
+  const [creditNote, setCreditNote] = useState<string | null>(null);
+
+  /**
+   * Ask now. A resolving answer replaces the row here and in the list, so the button disappears;
+   * anything else is "still processing", which is an answer rather than a failure. A failure says
+   * why — offline above all — and never changes the row.
+   */
+  const checkStatus = async (transactionHash: string) => {
+    setCheckingStatus(true);
+    setStatusNote(null);
+    try {
+      const fresh = await wallet.refreshTransactionStatus(transactionHash);
+      if (fresh) {
+        setDetail(fresh);
+        setRows(
+          (prev) =>
+            prev?.map((r) => (r.transactionHash === transactionHash ? fresh : r)) ?? prev
+        );
+      }
+      if (isOpen(fresh)) {
+        setStatusNote('Still processing — the wallet will keep checking.');
+      }
+    } catch (e) {
+      const err = e as VeyraError;
+      setStatusNote(
+        err.code === 'NO_NETWORK_CONNECTION'
+          ? 'No internet connection — connect and try again.'
+          : `Could not check right now: ${err.message}`
+      );
+    } finally {
+      setCheckingStatus(false);
+    }
+  };
+
+  /**
+   * Ask the merchant's bank now. A confirming answer replaces the row here and in the list, so the
+   * button disappears; anything else is "not confirmed **yet**" and leaves the row alone. A failure
+   * says why — offline above all — and never changes the row.
+   */
+  const checkMerchantCredit = async (transactionHash: string) => {
+    setCheckingCredit(true);
+    setCreditNote(null);
+    try {
+      const fresh = await wallet.refreshCreditConfirmation(transactionHash);
+      if (fresh) {
+        setDetail(fresh);
+        setRows(
+          (prev) =>
+            prev?.map((r) => (r.transactionHash === transactionHash ? fresh : r)) ?? prev
+        );
+      }
+      if (fresh?.creditConfirmationStatus !== 'RECEIVED') {
+        setCreditNote('Still not confirmed — the wallet will keep checking.');
+      }
+    } catch (e) {
+      const err = e as VeyraError;
+      setCreditNote(
+        err.code === 'NO_NETWORK_CONNECTION'
+          ? 'No internet connection — connect and try again.'
+          : `Could not check right now: ${err.message}`
+      );
+    } finally {
+      setCheckingCredit(false);
+    }
+  };
 
   useFocusEffect(
     useCallback(() => {
@@ -160,7 +240,49 @@ export function WalletTransactionsScreen({
                 {creditText(t.creditConfirmationStatus)}
               </Text>
               {creditDetail(t) ? <Text style={styles.meta}>{creditDetail(t)}</Text> : null}
+              {/*
+                "Check merchant credit" — the manual ask beside the SDK's own 30-day credit sweep.
+                Shown on exactly the predicate the SDK enforces internally: approved, the
+                merchant's bank on the confirmation rail, and not already RECEIVED — which
+                deliberately includes a row the sweep gave up on and stamped UNABLE_TO_CONFIRM.
+                That give-up means "we stopped asking", never "the merchant was not paid", so it is
+                the row this button matters most for; a later RECEIVED replaces it.
+              */}
+              {t.authorizationStatus === 'APPROVED' &&
+              t.creditConfirmationStatus !== 'RECEIVED' &&
+              t.transactionHash ? (
+                <>
+                  <Button
+                    title={
+                      checkingCredit
+                        ? "Checking whether the merchant's bank received the funds…"
+                        : 'Check merchant credit'
+                    }
+                    // The SDK has no throttle by design — the screen disables its own button.
+                    disabled={checkingCredit}
+                    onPress={() => checkMerchantCredit(t.transactionHash!)}
+                  />
+                  {creditNote ? <Text style={styles.meta}>{creditNote}</Text> : null}
+                </>
+              ) : null}
             </View>
+          ) : null}
+          {/*
+            "Check status" — the manual ask beside the SDK's own background poll. Shown ONLY while
+            the row is still open; it disappears the moment the payment resolves, because a settled
+            row has nothing left to ask and offering the action would imply its outcome might still
+            change. It is the only route to an answer once the SDK's 30-day poll gives up.
+          */}
+          {isOpen(t) && t.transactionHash ? (
+            <>
+              <Button
+                title={checkingStatus ? 'Checking the payment status…' : 'Check status'}
+                // The SDK has no throttle by design — the screen disables its own button.
+                disabled={checkingStatus}
+                onPress={() => checkStatus(t.transactionHash!)}
+              />
+              {statusNote ? <Text style={styles.meta}>{statusNote}</Text> : null}
+            </>
           ) : null}
           {t.transactionHash ? (
             <>

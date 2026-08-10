@@ -6,6 +6,7 @@ import QRCode from 'react-native-qrcode-svg';
 import type { RootStackParamList } from '../../App';
 import {
   merchant,
+  VeyraError,
   type MerchantReceipt,
   type MerchantTransaction,
 } from 'veyra-sdk-react-native';
@@ -18,6 +19,80 @@ export function MerchantTransactionsScreen({
   const [rows, setRows] = useState<MerchantTransaction[] | null>(null);
   const [detail, setDetail] = useState<MerchantTransaction | null>(null);
   const [receipt, setReceipt] = useState<MerchantReceipt | null>(null);
+  // In-flight state for the manual "check status" ask, and its transient note.
+  const [checkingStatus, setCheckingStatus] = useState(false);
+  const [statusNote, setStatusNote] = useState<string | null>(null);
+  // In-flight state for the manual "check merchant credit" ask, and its transient note.
+  const [checkingCredit, setCheckingCredit] = useState(false);
+  const [creditNote, setCreditNote] = useState<string | null>(null);
+
+  /**
+   * Ask now. A resolving answer replaces the row here and in the list, so the button disappears;
+   * anything else is "still processing", which is an answer rather than a failure. A failure says
+   * why — offline above all — and never changes the row.
+   */
+  const checkStatus = async (reference: string) => {
+    setCheckingStatus(true);
+    setStatusNote(null);
+    try {
+      const fresh = await merchant.refreshTransactionStatus(reference);
+      if (fresh) {
+        setDetail(fresh);
+        setRows(
+          (prev) =>
+            prev?.map((r) =>
+              r.merchantTransactionReference === reference ? fresh : r
+            ) ?? prev
+        );
+      }
+      if (!fresh || fresh.status === 'PENDING') {
+        setStatusNote('Still processing — the SDK will keep checking.');
+      }
+    } catch (e) {
+      const err = e as VeyraError;
+      setStatusNote(
+        err.code === 'NO_NETWORK_CONNECTION'
+          ? 'No internet connection — connect and try again.'
+          : `Could not check right now: ${err.message}`
+      );
+    } finally {
+      setCheckingStatus(false);
+    }
+  };
+
+  /**
+   * Ask the merchant's bank now. A confirming answer replaces the row here and in the list, so the
+   * button disappears; anything else is "not confirmed **yet**" and leaves the row alone. A failure
+   * says why — offline above all — and never changes the row.
+   */
+  const checkMerchantCredit = async (reference: string) => {
+    setCheckingCredit(true);
+    setCreditNote(null);
+    try {
+      const fresh = await merchant.refreshCreditConfirmation(reference);
+      if (fresh) {
+        setDetail(fresh);
+        setRows(
+          (prev) =>
+            prev?.map((r) =>
+              r.merchantTransactionReference === reference ? fresh : r
+            ) ?? prev
+        );
+      }
+      if (fresh?.creditConfirmationStatus !== 'RECEIVED') {
+        setCreditNote('Still not confirmed — the SDK will keep checking.');
+      }
+    } catch (e) {
+      const err = e as VeyraError;
+      setCreditNote(
+        err.code === 'NO_NETWORK_CONNECTION'
+          ? 'No internet connection — connect and try again.'
+          : `Could not check right now: ${err.message}`
+      );
+    } finally {
+      setCheckingCredit(false);
+    }
+  };
 
   const openReceiptFor = route.params?.openReceiptFor;
 
@@ -66,6 +141,49 @@ export function MerchantTransactionsScreen({
                 <Text style={styles.ref}>{v}</Text>
               </View>
             ))}
+          {/*
+            "Check status" — the manual ask beside the SDK's own background poll. Shown ONLY while
+            the row is PENDING; it disappears the moment the payment resolves, because a settled row
+            has nothing left to ask and offering the action would imply its outcome might still
+            change. It is the only route to an answer once the SDK's 30-day poll gives up.
+          */}
+          {detail.status === 'PENDING' && (
+            <>
+              <Button
+                title={checkingStatus ? 'Checking the payment status…' : 'Check status'}
+                // The SDK has no throttle by design — the screen disables its own button.
+                disabled={checkingStatus}
+                onPress={() => checkStatus(detail.merchantTransactionReference)}
+              />
+              {statusNote ? <Text style={styles.meta}>{statusNote}</Text> : null}
+            </>
+          )}
+          {/*
+            "Check merchant credit" — the manual ask beside the SDK's own 30-day credit sweep.
+            Shown on exactly the predicate the SDK enforces internally: approved, the merchant's
+            bank on the confirmation rail, and not already RECEIVED — which deliberately includes a
+            row the sweep gave up on and stamped UNABLE_TO_CONFIRM. That give-up means "we stopped
+            asking", never "the funds were not received", so it is the row this button matters most
+            for; a later RECEIVED replaces it. On an approved row this is the button that applies;
+            on a pending one, "Check status" above is.
+          */}
+          {detail.status === 'APPROVED' &&
+            detail.isCreditConfirmationSupported === true &&
+            detail.creditConfirmationStatus !== 'RECEIVED' && (
+              <>
+                <Button
+                  title={
+                    checkingCredit
+                      ? "Checking whether the merchant's bank received the funds…"
+                      : 'Check merchant credit'
+                  }
+                  // The SDK has no throttle by design — the screen disables its own button.
+                  disabled={checkingCredit}
+                  onPress={() => checkMerchantCredit(detail.merchantTransactionReference)}
+                />
+                {creditNote ? <Text style={styles.meta}>{creditNote}</Text> : null}
+              </>
+            )}
           {detail.status === 'APPROVED' && (
             <Button title="Receipt QR" onPress={() => { showReceipt(detail.merchantTransactionReference); setDetail(null); }} />
           )}

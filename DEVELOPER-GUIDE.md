@@ -315,8 +315,35 @@ keeps that up for **30 days** from the transaction date, then stops asking.
 `'PENDING'`, which is still true — and simply leaves the poll list. The SDK never writes
 `'FAILED'`, `'DECLINED'` or any verdict of its own; only the backend decides what a payment
 was. Treat a long-`'PENDING'` row as *unresolved*, not failed, however old it is.
-`reconcilePendingTransactions()` still works past the window, and unlike the scheduled sweep
-it ignores the backoff — an explicit ask always reaches the backend.
+
+**Let the user ask on demand — `refreshTransactionStatus`.** The SDK polls a pending
+transaction for you with **exponential backoff**, and **stops after 30 days**. Polling never
+invents an outcome — a row that ages out simply stops being asked about and stays
+`'PENDING'`. Expose **`refreshTransactionStatus`** in your UI so the user can ask on demand,
+which is the route for anything still pending after the window closes.
+
+```ts
+// wallet: keyed by transaction hash. Resolves the updated row, or null if unknown here.
+const updated = await wallet.refreshTransactionStatus(summary.transactionHash);
+
+// merchant: keyed by the merchant transaction reference.
+const row = await merchant.refreshTransactionStatus(reference);
+```
+
+The per-transaction counterpart to `reconcilePendingTransactions()` (wallet) and
+`getTransaction()` (merchant): it asks about that one row now and writes the answer into the
+same local store the background sweep writes, so an on-demand check and a background check
+can never disagree.
+
+- **Show it only while the row is `'PENDING'`.** A settled row has nothing to ask, and
+  offering the action implies the outcome might still change.
+- **It works past the 30-day window**, and on a row the sweep never had on its list.
+- **It is not a way to force an outcome.** A still-unsettled payment answers `'PENDING'`
+  again — show a brief "still processing" note rather than retrying in a loop.
+- **A failed call rejects and changes nothing** — code `'NO_NETWORK_CONNECTION'` when the
+  device is offline. Show the error and leave the row pending.
+- **No SDK-side throttle.** Disable the button while the call is in flight, as the samples do
+  (`WalletTransactionsScreen.tsx`, `MerchantTransactionsScreen.tsx`).
 
 ### 6.6 Merchant credit confirmation (wallet side)
 
@@ -332,11 +359,13 @@ stored row is the whole surface. Read it when a detail screen opens, and re-read
 `getTransactions(ref)` every few seconds while it is open if you want the line to flip live
 (see the sample's `WalletTransactionsScreen`).
 
-`TransactionSummary` carries five fields for it:
+`TransactionSummary` carries five fields for it. The first three are the **eligibility
+contract**: they are how you decide whether to render a credit line at all, and whether you
+may call `refreshCreditConfirmation` (below). They are not merely a cue to wait.
 
 | Field | What it means for you |
 |---|---|
-| `isCreditConfirmationSupported: boolean \| null` | **The gate.** `true` ⇒ the merchant's bank is on the confirmation rail, the SDK is polling, and you should render the credit line. `false`/`null` ⇒ there is nothing to ask — render **no** credit UI for that transaction. |
+| `isCreditConfirmationSupported: boolean \| null` | **The gate.** `true` ⇒ the merchant's bank is on the confirmation rail, the SDK is polling, and you should render the credit line **and may offer the manual check**. `false`/`null` ⇒ there is nothing to ask — render **no** credit UI for that transaction, and **do not call `refreshCreditConfirmation`**. |
 | `creditConfirmationStatus: string \| null` | `null` = no answer yet (with the gate `true`, that is the "confirming…" state) · `'RECEIVED'` = terminal, the funds are confirmed in the merchant's account · `'UNABLE_TO_CONFIRM'` = the 30-day sweep stopped asking. |
 | `creditTransactionId: string \| null` | The credit leg's id — display/support only; never pass it back to the SDK. |
 | `creditedAt: string \| null` | When the beneficiary bank posted the credit. `'RECEIVED'` only. |
@@ -360,6 +389,42 @@ with the app. Neither loses an answer — the state lives in the SDK's store.
 A failed poll — device offline, gateway unreachable, an unreadable answer — changes nothing:
 the SDK backs off and asks again, leaving the row exactly as it was. "We could not reach the
 server" is never recorded as "the payment failed".
+
+#### `wallet.refreshCreditConfirmation` — let the customer ask on demand
+
+The SDK polls for beneficiary credit confirmation with **exponential backoff** and **stops
+after 30 days**, finalising the row as `'UNABLE_TO_CONFIRM'` — which means "we stopped
+asking", never "the funds were not received". Expose **`refreshCreditConfirmation`** in your
+UI so the user can ask on demand; it works after the window closes, and a later
+`'RECEIVED'` replaces the give-up state.
+
+**Check `isCreditConfirmationSupported` on the transaction first.** Not every merchant's
+bank is on this rail. `true` means the SDK is polling and you may offer the manual check;
+`false`/`null` means there is nothing to ask — do not call it, and show no credit UI for
+that transaction. Offer the action only while
+
+```ts
+tx.authorizationStatus === 'APPROVED' &&
+  tx.isCreditConfirmationSupported === true &&
+  tx.creditConfirmationStatus !== 'RECEIVED'
+```
+
+```ts
+// Keyed by the row's transaction hash, never by a credit id.
+const updated = await wallet.refreshCreditConfirmation(tx.transactionHash);
+```
+
+- **A row outside that predicate is a no-op**, not a rejection: no request is made and the
+  unchanged row resolves.
+- **It works past the 30-day window**, including on a row already stamped
+  `'UNABLE_TO_CONFIRM'` — that is the case it exists for. Nothing ever replaces `'RECEIVED'`.
+- **Only a confirmation is written.** Anything else leaves the row exactly as it was.
+- **Settlement only.** Nothing on this path can change `authorizationStatus`,
+  `responseCode` or `responseStatusReason`.
+- **Still no event** — the resolved row and the stored history are the wallet's whole credit
+  surface, by design.
+- **A failed call rejects and changes nothing** — `NO_NETWORK_CONNECTION` when the device is
+  offline. Show the error and leave the credit line reading "not confirmed yet".
 
 ## 7. Merchant (Get paid) API
 
@@ -422,14 +487,36 @@ taps toward your launcher activity and away from the session.
   expiry event on `merchant.onQrExpired`.
 - **Charge a customer QR (consumer-presented):** `inspectCustomerQr(payload)` →
   `{ handle, maskedCard, amountMinorUnits }` → confirm on screen →
-  `chargeCustomerQr(handle, reference?)`.
+  `chargeCustomerQr(handle, merchantOrderId?)`.
+
+> **The transaction reference is minted by the SDK, not by your app.** It comes back on the
+> outcome as `merchantTransactionReference` (`{terminalId}-YYYYMMDDHHmmssSSS`) and is the key for
+> receipts, `refreshTransactionStatus` and credit confirmation. The optional `merchantOrderId` is
+> the field for **your** order / basket / invoice id: echoed back, never validated for uniqueness
+> and never a lookup key, so it may repeat across attempts of one sale — which is what ties a retry
+> to its original order. **Availability in 1.0.14:** `chargeCustomerQr` takes it; `tap.start` accepts
+> it at the native bridge but the `TapRequest` TypeScript type does not yet declare it, and
+> `createPaymentContext` does not carry one at all — see §10.
 
 ### 7.4 Transactions & receipts
 
-`getTransactions(limit?)`, `getTransaction(reference)`, `getReceipt(reference)` — the
+`getTransactions(limit?)`, `getTransaction(reference)`,
+`refreshTransactionStatus(reference)`, `refreshCreditConfirmation(reference)`,
+`getReceipt(reference)` — the
 receipt carries `qrCodeBase64` (Android, ready-made PNG) **or** `qrPayload` (iOS,
 render it yourself); display whichever is non-null (see
 `MerchantTransactionsScreen.tsx`).
+
+`getTransaction` is a **local** read; `refreshTransactionStatus` is the on-demand check that
+asks the gateway and updates the stored row — see §6.5 for the rules that govern it (pending
+rows only, works past the 30-day window, rejects with `'NO_NETWORK_CONNECTION'` offline).
+
+`refreshCreditConfirmation` is its settlement twin: "has my bank actually received the funds?",
+asked on demand for one **approved** sale. Gate it on
+`isCreditConfirmationSupported === true` and offer it only while the credit is not already
+`'RECEIVED'` — see §7.5 for the full rules (works past the 30-day window, replaces the
+`'UNABLE_TO_CONFIRM'` give-up, never touches the outcome triple). On an approved row the two
+buttons sit side by side; on a pending one only `refreshTransactionStatus` applies.
 
 A `MerchantTransaction` also carries `cardholderName` — the paying card's name as it
 presented it (EMV tag `5F20`); on a Veyra token that is the card's display name, e.g.
@@ -483,6 +570,46 @@ platform branch. (On iOS the sweep runs while the app is alive — no OS backgro
 execution; it suspends and resumes with the app; iOS also has no tap rail.) Keep the
 stored-row read anyway: the event does not replay, so a screen opened after the answer
 landed learns it from `merchant.getTransaction(ref)`, as the sample does.
+
+#### `merchant.refreshCreditConfirmation` — let the merchant ask on demand
+
+The SDK polls for beneficiary credit confirmation with **exponential backoff** and **stops
+after 30 days**, finalising the row as `'UNABLE_TO_CONFIRM'` — which means "we stopped
+asking", never "the funds were not received". Expose **`refreshCreditConfirmation`** in your
+UI so the merchant can ask on demand; it works after the window closes, and a later
+`'RECEIVED'` replaces the give-up state.
+
+**Check `isCreditConfirmationSupported` on the transaction first.** Not every merchant's
+bank is on this rail. `true` means the SDK is polling and you may offer the manual check;
+`false`/`null` means there is nothing to ask — do not call it, and show no credit UI for
+that transaction. Offer the action only while
+
+```ts
+tx.status === 'APPROVED' &&
+  tx.isCreditConfirmationSupported === true &&
+  tx.creditConfirmationStatus !== 'RECEIVED'
+```
+
+```ts
+const updated = await merchant.refreshCreditConfirmation(reference); // MerchantTransaction | null
+```
+
+- **A row outside that predicate is a no-op**, not a rejection: no request is made and the
+  unchanged row resolves. The gateway refuses the same cases, so the SDK does not spend a
+  round trip being told.
+- **It works past the 30-day window**, including on a row already stamped
+  `'UNABLE_TO_CONFIRM'` — that is the case it exists for. Nothing ever replaces `'RECEIVED'`.
+- **Only a confirmation is written.** An answer of `'UNABLE_TO_CONFIRM'`, or one this SDK
+  version does not recognise, leaves the row exactly as it was — "not confirmed **yet**",
+  never "not received".
+- **Settlement only.** Nothing on this path can change `status`, `responseCode` or
+  `responseStatusReason`.
+- **It writes the store and fires `merchant.onCreditConfirmation`**, exactly as the
+  background sweep does — both go through the same write — so your existing subscription
+  needs no change.
+- **A failed call rejects and changes nothing** — `NO_NETWORK_CONNECTION` when the device is
+  offline. Show the error and leave the credit line reading "not confirmed yet".
+- **No SDK-side throttle.** Disable your button while a call is in flight.
 
 **Holding the result screen (your app's decision, never the SDK's).** A terminal outcome is
 a destination, not a notification. `PaymentResultScreen` holds every terminal result —
@@ -563,6 +690,9 @@ promise a refresh that cannot happen:
 | Merchant registration + QR rails | ✅ | ✅ |
 | Receipt QR | PNG (`qrCodeBase64`) | payload (`qrPayload`) |
 | `appleTeamId` | — | required |
+| `merchantOrderId` on `chargeCustomerQr` | ✅ | ✅ |
+| `merchantOrderId` on `tap.start` | ⚠️ accepted by the native bridge, but **not yet in the `TapRequest` type** — a typed call does not compile against 1.0.14 | — (no tap rail) |
+| `merchantOrderId` on `createPaymentContext` | ❌ not carried in 1.0.14 | ❌ |
 | Pending-outcome polling (backoff, 30-day stop) | ✅ | ✅ |
 | …but its lifetime | runs in the background via WorkManager | **app-scoped only** — no OS background execution |
 

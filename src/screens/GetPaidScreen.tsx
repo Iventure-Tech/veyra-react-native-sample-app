@@ -25,6 +25,16 @@ import { QrTile, Busy, Button, Field, formatAmount, FormScrollView, Section } fr
 type Rail = 'idle' | 'tap' | 'mpm' | 'cpmScan' | 'cpmConfirm' | 'cpmCharging';
 
 /**
+ * A stand-in for the till's own order/basket/invoice id, which a real integration would take
+ * from its POS rather than generate here.
+ *
+ * Optional, never used as a lookup key, and safe to repeat across attempts of one sale — which
+ * is what ties a retry back to the original order, since every attempt mints its own transaction
+ * reference. The reference itself is the SDK's to mint and arrives on the outcome.
+ */
+const nextSampleOrderId = (): string => `ORDER-${Date.now()}`;
+
+/**
  * The merchant screen. `useGetPaidSession` is the load-bearing line: while this screen
  * is focused the reader can arm; leaving it disarms the device — that is the whole
  * single-Activity mode contract from the app's point of view.
@@ -218,7 +228,10 @@ export function GetPaidScreen({
     // the idle screen here reads as the payment having vanished.
     setRail('cpmCharging');
     try {
-      const outcome = await merchant.chargeCustomerQr(cpm.handle);
+      // The second argument is *your* order/basket/invoice id — optional, never used as a
+      // lookup key, and safe to repeat across attempts of one sale. The transaction reference
+      // is minted by the SDK and comes back on the outcome; never invent one.
+      const outcome = await merchant.chargeCustomerQr(cpm.handle, nextSampleOrderId());
       if (outcome.approved && outcome.merchantTransactionReference) {
         setLastApprovedRef(outcome.merchantTransactionReference);
       }

@@ -184,6 +184,8 @@ describe('cpmChargeToParams', () => {
     responseCode: '00',
     transactionId: 'TXN-9',
     merchantTransactionReference: 'REF-9',
+    // STORY-116: the outcome echoes back your own order id (null when none was supplied).
+    merchantOrderId: null,
     creditTransactionId: null,
     isCreditConfirmationSupported: null,
     ...over,

@@ -213,15 +213,30 @@ export function walletPaymentToParams(
   outcome: PaymentOutcome,
   amountMinorUnits: number
 ): PaymentResultParams {
+  // The push answers with a status, and PENDING is a real answer — the payer must not be told
+  // they were refused when the SDK has stored the payment as unresolved and is still polling
+  // for it. Anything not stated final is pending, exactly as the SDK records it.
+  const stated = outcome.responseStatus?.trim().toUpperCase();
+  const state: PaymentResultOutcome =
+    stated === 'APPROVED'
+      ? 'approved'
+      : stated === 'DECLINED' || stated === 'FAILED'
+        ? 'declined'
+        : 'pending';
+  const title =
+    state === 'approved' ? 'Payment Successful' : state === 'pending' ? 'Payment Pending' : 'Declined';
   return {
-    outcome: outcome.approved ? 'approved' : 'declined',
-    title: outcome.approved ? 'Payment Successful' : 'Declined',
-    message: outcome.message ?? (outcome.approved ? 'Paid' : 'Not paid'),
+    outcome: state,
+    title,
+    message:
+      outcome.message ??
+      (state === 'approved' ? 'Paid' : state === 'pending' ? PENDING_MESSAGE : 'Not paid'),
     amountMinorUnits,
     details: lines(
       outcome.merchantName,
       outcome.merchantLocation,
-      `Response: ${outcome.responseCode ?? '-'}`
+      `Response: ${outcome.responseCode ?? '-'}`,
+      state === 'pending' ? PENDING_MESSAGE : undefined
     ),
   };
 }

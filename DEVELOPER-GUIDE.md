@@ -288,6 +288,16 @@ returns `{ verified: false, reason }` (`MALFORMED` / `MISSING_SIGNATURE` /
 `UNKNOWN_KEY` / `BAD_SIGNATURE` / `EXPIRED`) — never show a confirm screen for it. The
 verified `handle` is single-use and never contains the payload.
 
+**Read `payScannedContext`'s outcome from `responseStatus`, not from `approved`.** The push
+is a synchronous call, but its *outcome* can still be unknown: the gateway answers
+`'PENDING'` when a hop below it timed out (`68`), errored (`06`/`96`) or is still settling
+(`09`). That is not a refusal — the SDK records the payment as unresolved and keeps polling
+it until the gateway states a final outcome, which then shows on the history row. `approved`
+is a convenience for the happy path only (`responseStatus === 'APPROVED'`); it is `false`
+for a pending payment as well as a declined one, so a screen that branches on it tells the
+payer they were refused when they were not. Anything not `'APPROVED'` / `'DECLINED'` /
+`'FAILED'` — including an absent status — is pending.
+
 ### 6.5 History & receipts
 
 `getTransactions(ref, limit?)` (call `reconcilePendingTransactions()` first to settle

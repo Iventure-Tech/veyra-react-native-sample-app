@@ -230,6 +230,8 @@ describe('walletPaymentToParams', () => {
   const outcome = (over: Partial<PaymentOutcome> = {}): PaymentOutcome => ({
     approved: true,
     responseCode: '00',
+    responseStatus: 'APPROVED',
+    responseStatusReason: 'APPROVED',
     message: 'Paid',
     merchantName: 'Veyra Coffee',
     merchantLocation: 'Lagos, LA',
@@ -259,11 +261,57 @@ describe('walletPaymentToParams', () => {
 
   it('declines with the SDK message', () => {
     const params = walletPaymentToParams(
-      outcome({ approved: false, message: 'Insufficient funds', responseCode: '51' }),
+      outcome({
+        approved: false,
+        responseStatus: 'DECLINED',
+        message: 'Insufficient funds',
+        responseCode: '51',
+      }),
       300
     );
     expect(params.outcome).toBe('declined');
     expect(params.title).toBe('Declined');
     expect(params.message).toBe('Insufficient funds');
+  });
+
+  // A push is a synchronous call whose OUTCOME can still be unknown: the gateway answers
+  // PENDING when a hop below it timed out (68), errored (06/96) or is still settling (09).
+  // Reading `approved` alone showed all four as a decline, which is what the payer was told
+  // while the SDK went on polling the payment to a different answer.
+  it.each([
+    ['68', 'NO_RESPONSE_RECEIVED'],
+    ['06', 'UPSTREAM_ERROR'],
+    ['96', 'SYSTEM_MALFUNCTION'],
+    ['09', 'TRANSACTION_IN_PROCESS'],
+  ])('shows a %s/PENDING push as pending, not declined', (code, reason) => {
+    const params = walletPaymentToParams(
+      outcome({
+        approved: false,
+        responseCode: code,
+        responseStatus: 'PENDING',
+        responseStatusReason: reason,
+        message: null,
+      }),
+      300
+    );
+    expect(params.outcome).toBe('pending');
+    expect(params.title).toBe('Payment Pending');
+    expect(params.details).toContain(
+      'Status unknown. The issuer may have approved. Check transactions for updates.'
+    );
+  });
+
+  it('treats an absent or unrecognised status as pending, never as a refusal', () => {
+    const noStatus = walletPaymentToParams(
+      outcome({ approved: false, responseStatus: null, message: null }),
+      300
+    );
+    expect(noStatus.outcome).toBe('pending');
+
+    const unknown = walletPaymentToParams(
+      outcome({ approved: false, responseStatus: 'SETTLING', message: null }),
+      300
+    );
+    expect(unknown.outcome).toBe('pending');
   });
 });

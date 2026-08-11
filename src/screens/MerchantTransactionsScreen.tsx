@@ -112,9 +112,10 @@ export function MerchantTransactionsScreen({
   if (detail) {
     const fields: Array<[string, string | null]> = [
       ['Reference', detail.merchantTransactionReference],
-      // Your own order id, echoed back by the gateway. Null on sales that carried none (and on
-      // every sale predating it) — the renderer drops null rows, so nothing empty is drawn.
-      ['Your order ID', detail.merchantOrderId],
+      // Your own order id. Always a row, em-dash when the sale carried none — the same null
+      // rendering the wallet's detail uses. (This used to drop the row on legacy sales;
+      // superseded so the two sides of a payment show the same shape of detail.)
+      ['Your order ID', detail.merchantOrderId || '—'],
       // Which rail took the payment (Tap / QR / Scan) — the SDK derives the wording, so this
       // reads the same as on Android and iOS. A QR payment must never show as a tap.
       ['Paid via', detail.railLabel],
@@ -132,6 +133,14 @@ export function MerchantTransactionsScreen({
       // Whether the merchant's bank confirmed receiving the funds. Null while unconfirmed
       // (the row is simply omitted) — never shown as "not received".
       ['Merchant credit', detail.creditConfirmationStatus],
+      // The credit leg's own id — what you quote to a bank when chasing the settlement. Shown
+      // only where the confirmation rail applies at all: with no rail there is nothing to
+      // quote. Em-dash rather than a blank, matching the wallet's detail.
+      ...(detail.isCreditConfirmationSupported === true
+        ? ([['Credit transaction ID', detail.creditTransactionId || '—']] as Array<
+            [string, string | null]
+          >)
+        : []),
     ];
     return (
       <ScrollView contentContainerStyle={styles.container}>

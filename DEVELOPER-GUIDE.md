@@ -244,7 +244,7 @@ iOS-only param: `bankName` (shown on the stored card). Android additionally requ
 | `wallet.checkTokenActive(ref)` | one-shot server check (boolean) |
 | `wallet.tokenStatus(ref)` | one-shot server check, five-valued (`ACTIVE` / `PENDING_ACTIVATION` / `SUSPENDED` / `DEACTIVATED` / `EXPIRED`) — say *why* a card is unavailable |
 | `wallet.observeActivation(ref)` + `wallet.onActivationEvent(cb)` | polls every 10s for ≤5min; events `activated` / `timeout` / `error` |
-| `pause/resume/stopActivationObserver(ref)` | the timeout clock keeps running while paused |
+| `pauseActivationObserver(ref)` / `resumeActivationObserver(ref)` / `stopActivationObserver(ref)` | the timeout clock keeps running while paused |
 
 On `status: 'FAILURE'` both activation responses carry a typed `failureCode` — branch on it,
 never on `message`: `CODE_INVALID` (stay on entry; `attemptsRemaining` says how many are left),
@@ -270,6 +270,11 @@ track what you already observe instead of re-issuing on every render. See `PaySc
 3. `!isActive` — blocked server-side; `status` says why on both platforms (`SUSPENDED`:
    "contact your bank" · `PENDING_ACTIVATION`: "activate this card" · `EXPIRED`: "re-add the card").
 4. Otherwise payable.
+
+`wallet.getActiveCard()` → `Card | null` reads the currently selected card — the counterpart to
+`setActiveCard`, and the way a screen answers "which card would pay right now?" without inferring it
+from the list. `null` means no card is selected (never chosen, or the chosen one was removed), so
+treat it as "prompt the customer to choose" rather than as an error.
 
 `wallet.setActiveCard(card.id)` selects the card; on Android it also arms tap-to-pay
 (pay session required). `wallet.deactivateCard(ref)` removes it.
@@ -320,6 +325,13 @@ payer they were refused when they were not. Anything not `'APPROVED'` / `'DECLIN
 PENDING rows), `processReceipt(qrPayload, expectedHash?)` to verify-and-store a scanned
 merchant receipt, `getReceipts(limit?)`, `getReceiptForTransaction(hash)`.
 `entryMethod` is `'TAP' | 'QR_GENERATED' | 'QR_SCANNED'`.
+
+`TransactionSummary` also carries `merchantOrderId` — the merchant's own order/basket id for
+the sale, the id the merchant's systems know it by, so a customer can quote it at the
+counter. A scanned-QR (`'QR_SCANNED'`) row carries it from payment time; tap and
+generated-QR rows learn it from the status poll, so `null` on a still-open row means "not
+learned yet", not "no order id". **Display only, never a lookup key** — receipts and status
+refreshes still key off `transactionHash` / `merchantTransactionReference`.
 
 **How the SDK waits for a `PENDING` row** (wallet and merchant alike). You do not have to
 poll, schedule anything, or keep a screen open — the native SDK under the bridge asks on its
@@ -383,7 +395,7 @@ may call `refreshCreditConfirmation` (below). They are not merely a cue to wait.
 |---|---|
 | `isCreditConfirmationSupported: boolean \| null` | **The gate.** `true` ⇒ the merchant's bank is on the confirmation rail, the SDK is polling, and you should render the credit line **and may offer the manual check**. `false`/`null` ⇒ there is nothing to ask — render **no** credit UI for that transaction, and **do not call `refreshCreditConfirmation`**. |
 | `creditConfirmationStatus: string \| null` | `null` = no answer yet (with the gate `true`, that is the "confirming…" state) · `'RECEIVED'` = terminal, the funds are confirmed in the merchant's account · `'UNABLE_TO_CONFIRM'` = the 30-day sweep stopped asking. |
-| `creditTransactionId: string \| null` | The credit leg's id — display/support only; never pass it back to the SDK. |
+| `creditTransactionId: string \| null` | The credit leg's id (NIP session id inter-bank, batch reference intra-bank) — **what you quote to a bank** when the merchant says the money never arrived. Display/support only; never pass it back to the SDK, and render it only where the gate above is `true` — a bare id with no confirmation line reads as a promise. |
 | `creditedAt: string \| null` | When the beneficiary bank posted the credit. `'RECEIVED'` only. |
 | `bankReference: string \| null` | The beneficiary bank's own reference for the credit. `'RECEIVED'` only. |
 
@@ -539,6 +551,11 @@ A `MerchantTransaction` also carries `cardholderName` — the paying card's name
 presented it (EMV tag `5F20`); on a Veyra token that is the card's display name, e.g.
 `AFRIGO ****1234`, not a person's name. It is `null` on QR-MPM payments (the merchant
 never reads the card) and on transactions recorded by older SDK versions.
+
+And it carries `merchantOrderId` — your own order/basket id exactly as you supplied it on
+the charge (`chargeCustomerQr`, `tap.start`, `createPaymentContext`), your reconciliation
+key back to your POS/till; `null` on sales that carried none. **Display only, never a
+lookup key** — receipts and status refreshes key off `reference`.
 
 ### 7.5 Beneficiary credit confirmation
 

@@ -208,6 +208,9 @@ export function WalletTransactionsScreen({
       ['Location', t.merchantLocation],
       ['Amount', formatAmount(t.amountMinorUnits)],
       ['Status', t.authorizationStatus ?? 'PENDING'],
+      // The merchant's own order id — always a row, em-dash when absent: a tap/CPM row learns
+      // the value from the status poll, so absence often just means "not learned yet".
+      ['Merchant order ID', t.merchantOrderId || '—'],
       // The outcome's stated cause + code, verbatim from the backend; unresolved/legacy rows
       // carry neither and the rows render empty rather than a guess.
       ['Reason', t.responseStatusReason],
@@ -240,6 +243,13 @@ export function WalletTransactionsScreen({
                 {creditText(t.creditConfirmationStatus)}
               </Text>
               {creditDetail(t) ? <Text style={styles.meta}>{creditDetail(t)}</Text> : null}
+              {/*
+                The credit leg's own id — what a bank is quoted when a merchant says the money
+                never arrived. Same gate as the credit status above; em-dash, never a blank.
+              */}
+              <Text style={styles.meta}>
+                {`Credit transaction ID: ${t.creditTransactionId || '—'}`}
+              </Text>
               {/*
                 "Check merchant credit" — the manual ask beside the SDK's own 30-day credit sweep.
                 Shown on exactly the predicate the SDK enforces internally: approved, the

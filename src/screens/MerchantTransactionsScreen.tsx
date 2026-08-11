@@ -112,6 +112,9 @@ export function MerchantTransactionsScreen({
   if (detail) {
     const fields: Array<[string, string | null]> = [
       ['Reference', detail.merchantTransactionReference],
+      // Your own order id, echoed back by the gateway. Null on sales that carried none (and on
+      // every sale predating it) — the renderer drops null rows, so nothing empty is drawn.
+      ['Your order ID', detail.merchantOrderId],
       // Which rail took the payment (Tap / QR / Scan) — the SDK derives the wording, so this
       // reads the same as on Android and iOS. A QR payment must never show as a tap.
       ['Paid via', detail.railLabel],

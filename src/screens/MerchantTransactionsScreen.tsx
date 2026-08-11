@@ -127,7 +127,7 @@ export function MerchantTransactionsScreen({
       ['Transaction id', detail.transactionId],
       ['Card', detail.maskedTokenLast4],
       // The card's display name — a Veyra token shows e.g. "AFRIGO ****1234". Off EMV 5F20 on
-      // a tap, off the scanned QR on CPM, and from the gateway on QR-MPM (STORY-93).
+      // a tap, off the scanned QR on CPM, and from the gateway on QR-MPM.
       ['Cardholder', detail.cardholderName],
       // Whether the merchant's bank confirmed receiving the funds. Null while unconfirmed
       // (the row is simply omitted) — never shown as "not received".

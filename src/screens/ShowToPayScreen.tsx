@@ -3,7 +3,7 @@ import { Alert, StyleSheet, Text, View } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import QRCode from 'react-native-qrcode-svg';
-import { wallet, usePaySession, type PaymentQr } from 'veyra-sdk-react-native';
+import { wallet, usePaySession, type PaymentQr, type VeyraError } from 'veyra-sdk-react-native';
 import type { RootStackParamList } from '../../App';
 import { theme } from '../theme';
 import { QrTile, Busy, Button, formatAmount, Field, Section } from '../ui';
@@ -73,13 +73,17 @@ export function ShowToPayScreen({
     setExpired(false);
     setOutcome(null);
     try {
-      // Fresh device authentication per QR render, like a tap.
-      await wallet.authenticateForPayment('Show payment code');
+      // No authentication call: showQrToPay raises the device authentication sheet itself,
+      // once per render — so a regenerate after expiry asks again on its own.
       const rendered = await wallet.showQrToPay(Math.round(Number(amount) * 100));
       setQr(rendered);
       startWatching(rendered);
     } catch (e) {
-      Alert.alert('Cannot show QR', (e as Error).message);
+      const err = e as VeyraError;
+      // The customer dismissing the sheet is not an error worth a dialog — they just chose not
+      // to pay. Everything else is worth showing.
+      if (err.code === 'AUTH_CANCELLED') return;
+      Alert.alert('Cannot show QR', err.message);
     }
   };
 

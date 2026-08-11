@@ -279,11 +279,27 @@ track what you already observe instead of re-issuing on every render. See `PaySc
 | Rail | Methods | Platforms |
 |---|---|---|
 | Tap-to-pay | arm via `setActiveCard`; outcomes on `wallet.onTapEvent` (`transactionStarted` / `transactionCompleted` / `activationFailed`) | **Android only** |
-| Scan-to-pay | `inspectScannedQr(payload)` → verified handle → `authenticateForPayment(…)` → `payScannedContext(handle)` | both |
-| Show-QR-to-pay | `authenticateForPayment(…)` → `showQrToPay(amountMinorUnits)`; expiry on `onQrExpired`; `cancelQrExpiry()` on teardown | both |
+| Scan-to-pay | `inspectScannedQr(payload)` → verified handle → `payScannedContext(handle)` | both |
+| Show-QR-to-pay | `showQrToPay(amountMinorUnits)`; expiry on `onQrExpired`; `cancelQrExpiry()` on teardown | both |
 
-Authentication is **fresh and single-use** per payment or QR render — call
-`authenticateForPayment` immediately before. A scanned QR that fails verification
+**Device authentication (CDCVM) is the SDK's job — there is no method to call.**
+`payScannedContext` and `showQrToPay` raise the OS authentication sheet themselves
+(fingerprint/face on Android with PIN fallback in the same sheet; Face ID / Touch ID with
+passcode fallback on iOS) before building the payment. The SDK writes the prompt from the
+payment itself, so the gesture names the merchant and amount, and it asks **once per attempt** —
+a retry, or regenerating an expired QR, asks again. It asks only *after* the card checks pass, so
+a card that cannot pay is refused without spending the customer's gesture.
+
+Three error codes come back on those same calls: `AUTH_CANCELLED` (dismissed — offer it again),
+`AUTH_FAILED` (attempted, rejected — offer a retry) and `AUTH_UNAVAILABLE` (no biometric *and* no
+screen lock on this device — send them to system settings, a retry cannot help). Nothing is sent
+in any of the three.
+
+To change the wording or ship another language, pass the optional
+`cdcvmPaySubtitle` / `cdcvmShowQrSubtitle` (and `cdcvmAllowDeviceCredential`) in your
+`Veyra.initialize` wallet config — `{amount}` and `{merchant}` are substituted.
+
+A scanned QR that fails verification
 returns `{ verified: false, reason }` (`MALFORMED` / `MISSING_SIGNATURE` /
 `UNKNOWN_KEY` / `BAD_SIGNATURE` / `EXPIRED`) — never show a confirm screen for it. The
 verified `handle` is single-use and never contains the payload.
@@ -639,12 +655,69 @@ One `NativeEventEmitter` channel per family; subscribe via the typed helpers and
 | `wallet.onQrExpired` / `merchant.onQrExpired` | one `expired` per rendered QR |
 | `merchant.onTransactionResolved` | one settlement per pending sale — `APPROVED` / `DECLINED` / `FAILED`, never `PENDING` (see §10) |
 | `merchant.onCreditConfirmation` | one terminal credit confirmation per sale — `RECEIVED`, or the final 30-day `UNABLE_TO_CONFIRM` (see §7.5) |
+| `wallet.onTokenStatusChanged` | the issuer changed a card's status — suspended, reactivated, expired, deactivated (see §8.1) |
+| `wallet.onTransactionResolved` | one settlement per pending **wallet** payment — the payer-side twin of `merchant.onTransactionResolved`, keyed on `transactionHash` (see §8.1) |
+| `wallet.onCardKeyStateChanged` | a card ran out of payment keys, or a refresh replenished them (see §8.1) |
+| `merchant.onMerchantStatusChanged` | the merchant was deactivated, suspended or activated (see §8.1) |
+
+### 8.1 The SDK tells you when stored truth changes
+
+Four channels that exist because the SDK used to learn these things, write them to its own store,
+and say nothing — so your app found out only if it happened to read again. All four fire on
+**Android and iOS alike**, with the same event names and the same payload shapes.
+
+The rules below are the same for all four, and are worth reading once:
+
+- **Subscribe once, at start-up** — not per screen. The changes that matter most happen while no
+  screen is watching (a card suspended, a merchant deactivated, a payment settling days later), so
+  a per-screen subscription misses exactly the cases these exist for.
+- **There is no replay.** If your app was not running when it happened, nothing is queued. Keep
+  reading the store when a screen appears (`wallet.getCards()`, `wallet.getTransactions()`,
+  `merchant.getStoredMerchant()`); these events are a live update *on top of* that read, never a
+  replacement for it.
+- **Last registration wins** on the native side, and each helper returns a subscription — call
+  `remove()` on unmount.
+- **Only genuine changes fire.** A background poll re-applying the value it already had wakes
+  nothing.
+
+```ts
+const subs = [
+  wallet.onTokenStatusChanged((e) => {
+    // Branch on e.canPay, NOT on e.status: canPay is the SDK's own reading, so a status added to
+    // the backend after your build shipped is correctly "cannot pay" rather than an unhandled case.
+    if (!e.canPay) markCardUnavailable(e.tokenUniqueReference, e.status);
+  }),
+  wallet.onTransactionResolved((e) => {
+    // Match your row on e.transactionHash. This is the WALLET's channel — merchant.onTransactionResolved
+    // is the merchant's side of a payment and keys on a reference a wallet never sees.
+    finishPendingRow(e.transactionHash, e.status, e.reason);
+  }),
+  wallet.onCardKeyStateChanged((e) => setNeedsOnline(e.tokenUniqueReference, e.requiresOnline)),
+  merchant.onMerchantStatusChanged((e) => {
+    // Same rule as canPay: branch on canAcceptPayments, never on status.
+    if (!e.canAcceptPayments) disableGetPaid();
+  }),
+];
+// on unmount: subs.forEach((s) => s.remove());
+```
+
+**One limit to know about `onCardKeyStateChanged`**, because it changes how you word your UI: it
+fires when a payment consumes a key and when a refresh delivers new ones — the moments the SDK is
+actually executing. Payment keys *also* expire by clock, which happens with no SDK code running, so
+**nothing fires for that**; such a card simply reads as `requiresOnline` on your next
+`wallet.getCards()`. Do not present it as live coverage of every case. (`requiresOnline` here is
+the same value `getCards()` reports — the SDK reads one function for both.)
+
+**And on `merchant.onMerchantStatusChanged`:** the SDK owns the polling and it is app-scoped on both
+platforms. On iOS it pauses while the app is suspended and resumes on foreground; nothing is lost,
+because the comparison is against the stored status, so a change that happened while you were away
+still arrives on the first poll after you return.
 
 ## 9. Errors
 
 Every rejection is a `VeyraError` with a stable `code` — never string-match messages:
 
-> **Read `response_status`, not the code (STORY-98 / ISSUE-140).** Every payment outcome now carries a
+> **Read `response_status`, not the code.** Every payment outcome now carries a
 > triple: `response_code` (what the wire said), `response_status` (**what to do**) and
 > `response_status_reason` (why). Branch on `response_status` only — `APPROVED`, `DECLINED`, `FAILED`
 > or `PENDING`. Only the first three are final; `PENDING` always means "ask again". The SDK no longer
@@ -662,8 +735,8 @@ Every rejection is a `VeyraError` with a stable `code` — never string-match me
 | `NO_NETWORK_CONNECTION` | **the device** has no working internet connection — ask the user to connect and retry. Nothing was sent, so nothing needs undoing. Raised by every backend call in both experiences (wallet: get banks, verify account, digitise, request activation code, activate, token status; merchant: register, refresh/activate/deactivate/update merchant, create payment context, take a payment) |
 | `ONLINE_REQUIRED` | card needs the device online; grey it out, SDK self-heals |
 | `TOKEN_NOT_ACTIVE` | card blocked server-side |
-| `CDCVM_REQUIRED` | call `authenticateForPayment` first |
-| `AUTH_CANCELLED` / `AUTH_FAILED` | user backed out / failed device auth |
+| `AUTH_CANCELLED` / `AUTH_FAILED` | the customer dismissed / failed the device authentication the SDK raised — nothing was sent |
+| `AUTH_UNAVAILABLE` | no enrolled biometric **and** no screen lock on this device; send them to system settings — a retry cannot help |
 | `NO_ACTIVE_CARD` / `CARD_CANNOT_SHOW_QR` | select a payable card / re-add a pre-QR card |
 | `UNSUPPORTED_ON_PLATFORM` | e.g. wallet tap-to-pay on iOS |
 | `VALIDATION` (`field`) | fix the named parameter |

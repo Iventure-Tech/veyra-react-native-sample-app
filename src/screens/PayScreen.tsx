@@ -51,10 +51,23 @@ export function PayScreen({
 
   useFocusEffect(reload);
 
-  // The list also changes with no tap and no navigation — a background LUK refresh clears
-  // `requiresOnline`, the status sync can suspend or unfreeze a card — so re-read it on a
-  // timer while this screen is showing (instructor decision, 2026-08-07). Like the activation
-  // observers below, the poll follows the screen: stopped on blur, restarted on focus.
+  // The SDK now pushes both of the changes this screen used to discover only by re-reading:
+  // the issuer suspending or reactivating a card, and its payment keys running out or being
+  // replenished. Subscribed once here (not per card) — the case that matters is a card changing
+  // while this screen is already up, which is precisely when no re-read is coming.
+  useEffect(() => {
+    const subs = [
+      wallet.onTokenStatusChanged(reload),
+      wallet.onCardKeyStateChanged(reload),
+    ];
+    return () => subs.forEach((s) => s.remove());
+  }, [reload]);
+
+  // The timer stays, and it is not redundant — it covers the one case the pushes deliberately
+  // cannot. Payment keys also expire by *clock*, which happens with no SDK code running at all,
+  // so nothing fires for it; only a re-read notices. The events make the other cases immediate
+  // instead of up to CARD_LIST_RELOAD_MS late. Like the activation observers below, the poll
+  // follows the screen: stopped on blur, restarted on focus.
   useEffect(() => {
     if (!focused) return;
     const id = setInterval(reload, CARD_LIST_RELOAD_MS);

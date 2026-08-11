@@ -37,8 +37,8 @@ export function ScanToPayScreen({
     if (!inspection) return;
     setBusy(true);
     try {
-      // Fresh device authentication is required per payment.
-      await wallet.authenticateForPayment('Confirm payment');
+      // No authentication call: payScannedContext raises the device authentication sheet
+      // itself, naming this merchant and amount. One gesture per attempt — a retry asks again.
       const outcome = await wallet.payScannedContext(inspection.handle);
       // Replace, not push: the confirm screen is spent, so backing out of the result
       // must not land on a scanned context that can no longer be paid.
@@ -51,6 +51,13 @@ export function ScanToPayScreen({
       if (err.code === 'AUTH_CANCELLED') {
         setBusy(false);
         return; // user backed out of biometrics — stay on the confirm screen
+      }
+      if (err.code === 'AUTH_UNAVAILABLE') {
+        // No biometric and no screen lock on this device: a retry cannot help, so say what
+        // will — this is why it is a separate code from AUTH_FAILED.
+        setBusy(false);
+        Alert.alert('Set up a screen lock', err.message);
+        return;
       }
       navigation.replace(
         'PaymentResult',

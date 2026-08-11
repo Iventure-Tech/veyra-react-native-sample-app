@@ -482,7 +482,7 @@ taps toward your launcher activity and away from the session.
 ### 7.3 QR rails
 
 - **Get-paid QR (merchant-presented):** `createPaymentContext(amountMinorUnits,
-  currency?)` → render `mpmPayload`; poll `contextStatus(txRef)`
+  currency?, merchantOrderId?)` → render `mpmPayload`; poll `contextStatus(txRef)`
   (`PENDING → IN_FLIGHT → APPROVED/DECLINED/EXPIRED`); `cancelQrExpiry()` on teardown;
   expiry event on `merchant.onQrExpired`.
 - **Charge a customer QR (consumer-presented):** `inspectCustomerQr(payload)` →
@@ -494,9 +494,10 @@ taps toward your launcher activity and away from the session.
 > receipts, `refreshTransactionStatus` and credit confirmation. The optional `merchantOrderId` is
 > the field for **your** order / basket / invoice id: echoed back, never validated for uniqueness
 > and never a lookup key, so it may repeat across attempts of one sale — which is what ties a retry
-> to its original order. **Availability in 1.0.14:** `chargeCustomerQr` takes it; `tap.start` accepts
-> it at the native bridge but the `TapRequest` TypeScript type does not yet declare it, and
-> `createPaymentContext` does not carry one at all — see §10.
+> to its original order. **Every merchant-initiated rail takes it** (1.0.15+): `tap.start`
+> (`TapRequest.merchantOrderId`), `createPaymentContext(amountMinorUnits, currency?, merchantOrderId?)`
+> and `chargeCustomerQr(handle, merchantOrderId?)`. `TapRequest.merchantTransactionReference` is
+> **gone** — it was an input the SDK ignored once it began minting the reference itself.
 
 ### 7.4 Transactions & receipts
 
@@ -691,8 +692,8 @@ promise a refresh that cannot happen:
 | Receipt QR | PNG (`qrCodeBase64`) | payload (`qrPayload`) |
 | `appleTeamId` | — | required |
 | `merchantOrderId` on `chargeCustomerQr` | ✅ | ✅ |
-| `merchantOrderId` on `tap.start` | ⚠️ accepted by the native bridge, but **not yet in the `TapRequest` type** — a typed call does not compile against 1.0.14 | — (no tap rail) |
-| `merchantOrderId` on `createPaymentContext` | ❌ not carried in 1.0.14 | ❌ |
+| `merchantOrderId` on `tap.start` | ✅ | — (no tap rail) |
+| `merchantOrderId` on `createPaymentContext` | ✅ | ✅ |
 | Pending-outcome polling (backoff, 30-day stop) | ✅ | ✅ |
 | …but its lifetime | runs in the background via WorkManager | **app-scoped only** — no OS background execution |
 

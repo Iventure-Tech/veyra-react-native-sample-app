@@ -146,7 +146,11 @@ export function GetPaidScreen({
   const startTap = async () => {
     if (!requireActive()) return;
     try {
-      const { sessionId } = await merchant.tap.start({ amountMinorUnits: minorUnits });
+      const { sessionId } = await merchant.tap.start({
+        amountMinorUnits: minorUnits,
+        // Your own order id — optional, echoed back, never a lookup key.
+        merchantOrderId: nextSampleOrderId(),
+      });
       chargedRef.current = minorUnits;
       setTapSessionId(sessionId);
       setRail('tap');
@@ -165,7 +169,7 @@ export function GetPaidScreen({
   const showMpmQr = async () => {
     if (!requireActive()) return;
     try {
-      const qr = await merchant.createPaymentContext(minorUnits);
+      const qr = await merchant.createPaymentContext(minorUnits, undefined, nextSampleOrderId());
       chargedRef.current = minorUnits;
       setMpmQr(qr);
       setMpmState('PENDING');

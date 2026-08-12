@@ -152,11 +152,17 @@ session model (§5) working.
 
 ## 4. Initialise
 
+> **Breaking change:** `softpos` now requires a `paymentAppProviderId` — the globally unique
+> identifier issued to your organisation at onboarding, the same value the `wallet` block
+> carries. The gateway links every merchant you register to it and resolves your acquirer id
+> and MCC from it, so `acquirerId` is gone from the SoftPOS surface (config and
+> `merchant.register` alike).
+
 ```ts
 import Veyra from 'veyra-sdk-react-native';
 
 await Veyra.initialize({
-  softpos: { environment: 'TEST', clientId, clientSecret },
+  softpos: { environment: 'TEST', clientId, clientSecret, paymentAppProviderId },
   wallet: {
     environment: 'TEST',
     clientId, clientSecret,
@@ -458,10 +464,14 @@ const updated = await wallet.refreshCreditConfirmation(tx.transactionHash);
 
 ### 7.1 Registration & profile
 
-`merchant.register({ merchantType: 'PERSONAL' | 'BUSINESS', … })` (BVN for personal,
-CAC number for business), `getSettlementBanks()`, `isRegistered()`, `getStored()`,
-`refreshStatus()`, `activate()` / `deactivate()`, `update(…)`, `clearStored()` (local
-only). Gate acceptance on the stored merchant's status being `ACTIVE`.
+`merchant.register({ merchantType: 'PERSONAL' | 'BUSINESS', … })` (BVN required for
+personal and optional for business — the account holder behind a business has one too;
+CAC number for business; optional `walletAccountId`, stored verbatim by the gateway),
+`getSettlementBanks()`, `isRegistered()`, `getStored()`, `refreshStatus()`,
+`activate()` / `deactivate()`, `update(…)` (also accepts optional `walletAccountId` and
+`bvn`), `clearStored()` (local only). Gate acceptance on the stored merchant's status
+being `ACTIVE`. There is no `acquirerId` field anywhere: the gateway resolves it from
+your `paymentAppProviderId` and the SDK stores it from the responses.
 
 ### 7.2 Tap acceptance
 

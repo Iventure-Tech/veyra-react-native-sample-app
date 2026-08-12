@@ -9,6 +9,9 @@ export const VEYRA_CONFIG: VeyraConfig = {
     environment: 'TEST',
     clientId: 'your-client-id',
     clientSecret: 'your-client-secret',
+    // The payment app provider id from your onboarding pack — the same identifier the wallet
+    // block carries. The gateway resolves your acquirer id and MCC from it.
+    paymentAppProviderId: 'your-payment-app-provider-id',
   },
   wallet: {
     environment: 'TEST',
@@ -33,7 +36,7 @@ export const SAMPLE_ACCOUNT = {
   emailAddress: 'test@example.com',
   accountHolderAddress: '1 Test Street, Lagos',
   // Merchant registration prefill (merchant name = account holder, like the native samples).
-  acquirerId: 'ACQ001',
+  walletAccountId: 'test@example.bank',
   addressLine1: '20 Campbell Street',
   city: 'Lagos',
   state: 'Lagos',

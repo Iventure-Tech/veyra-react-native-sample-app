@@ -735,6 +735,14 @@ actually executing. Payment keys *also* expire by clock, which happens with no S
 `wallet.getCards()`. Do not present it as live coverage of every case. (`requiresOnline` here is
 the same value `getCards()` reports — the SDK reads one function for both.)
 
+**Where `wallet.onTokenStatusChanged`'s answers come from:** the SDK polls each stored card's
+server status itself on both platforms — Android from a background job (roughly every 15 minutes,
+even with the app backgrounded), iOS at configure, on every return to the foreground, and every
+15 minutes while the app runs (nothing runs while iOS keeps the app suspended; the next foreground
+catches up). The same poll also self-heals cards the server marks as needing refresh — a card
+nearing its expiry date is re-provisioned in place, with no app involvement and no event unless
+the status genuinely changes. There is nothing to wire: no lifecycle observer, no manual sync call.
+
 **And on `merchant.onMerchantStatusChanged`:** the SDK owns the polling and it is app-scoped on both
 platforms. On iOS it pauses while the app is suspended and resumes on foreground; nothing is lost,
 because the comparison is against the stored status, so a change that happened while you were away

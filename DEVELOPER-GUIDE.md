@@ -117,6 +117,14 @@ cp veyra.config.example.ts veyra.config.ts
    JS-only edits hot-reload through Metro from then on; rebuild only when native
    dependencies change.
 
+   > **If you swap the SDK package while Metro is running** — an `npm install` that
+   > upgrades `veyra-sdk-react-native`, or a local link that copies a different copy of
+   > it under `node_modules` — restart Metro afterwards with `npm start -- --reset-cache`
+   > (and rebuild for the native side). A running Metro keeps serving the package tree it
+   > started with, so the app would run the *old* JS bridge against the *new* native
+   > module and any newly added SDK method is `undefined` at the call site — a runtime
+   > "`… is not a function`" crash, not a build error.
+
 ### iOS
 
 1. Add the same repository credentials to `~/.netrc` (the prebuilt framework downloads

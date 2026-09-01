@@ -24,9 +24,9 @@ export function AddCardScreen({
   const [step, setStep] = useState<Step>('form');
   const [banks, setBanks] = useState<Bank[]>([]);
   const [bankName, setBankName] = useState<string | null>(null);
-  // ISSUE-221: no walletAccountId override here. The SDK hashes this value and the issuer
-  // compares that hash against the email/phone it holds for the account, so a placeholder
-  // ('wallet-user-1') can never match and costs the digitisation its identity-match signal.
+  // Every field comes from veyra.config — never override walletAccountId with a literal here.
+  // The SDK hashes that value and the issuer compares it against the email/phone it holds for the
+  // account, so a placeholder can never match and costs the digitisation its identity-match signal.
   const [form, setForm] = useState({ ...SAMPLE_ACCOUNT });
   const [tokenRef, setTokenRef] = useState<string | null>(null);
   const [methods, setMethods] = useState<ActivationMethodInfo[]>([]);

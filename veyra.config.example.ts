@@ -37,7 +37,7 @@ export const SAMPLE_ACCOUNT = {
   accountHolderAddress: '1 Test Street, Lagos',
   // The wallet's own id for this user. The SDK hashes it and the issuer compares that hash
   // against the email/phone registered on the account, so it must be one of those to match —
-  // hence the same value as emailAddress above (ISSUE-221). Also prefills merchant registration.
+  // hence the same value as emailAddress above. Also prefills merchant registration.
   walletAccountId: 'test@example.com',
   addressLine1: '20 Campbell Street',
   city: 'Lagos',

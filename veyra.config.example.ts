@@ -35,8 +35,10 @@ export const SAMPLE_ACCOUNT = {
   mobileNumber: '+2348000000000',
   emailAddress: 'test@example.com',
   accountHolderAddress: '1 Test Street, Lagos',
-  // Merchant registration prefill (merchant name = account holder, like the native samples).
-  walletAccountId: 'test@example.bank',
+  // The wallet's own id for this user. The SDK hashes it and the issuer compares that hash
+  // against the email/phone registered on the account, so it must be one of those to match —
+  // hence the same value as emailAddress above (ISSUE-221). Also prefills merchant registration.
+  walletAccountId: 'test@example.com',
   addressLine1: '20 Campbell Street',
   city: 'Lagos',
   state: 'Lagos',

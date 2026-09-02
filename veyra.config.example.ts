@@ -19,7 +19,6 @@ export const VEYRA_CONFIG: VeyraConfig = {
     clientSecret: 'your-client-secret',
     paymentAppProviderId: 'your-payment-app-provider-id',
     tokenRequestorId: 'your-token-requestor-id',
-    allowedCountryCodes: ['0566'],
     recommendationStandardVersion: '1.0',
     // iOS only: your Apple Developer Team ID (App Attest binds to it).
     appleTeamId: 'YOURTEAMID',

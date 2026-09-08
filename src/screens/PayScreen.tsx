@@ -173,7 +173,7 @@ export function PayScreen({
         style: 'destructive',
         onPress: async () => {
           try {
-            await wallet.deactivateCard(card.tokenUniqueReference ?? card.id);
+            await wallet.deactivateToken(card.tokenUniqueReference ?? card.id);
             reload();
           } catch (e) {
             Alert.alert('Could not remove card', (e as Error).message);

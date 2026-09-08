@@ -296,7 +296,9 @@ from the list. `null` means no card is selected (never chosen, or the chosen one
 treat it as "prompt the customer to choose" rather than as an error.
 
 `wallet.setActiveCard(card.id)` selects the card; on Android it also arms tap-to-pay
-(pay session required). `wallet.deactivateCard(ref)` removes it.
+(pay session required). `wallet.deactivateToken(ref)` removes it, resolving the backend's answer
+(`{ tokenUniqueReference, status, message }`) — the same name and the same shape as the Android
+and iOS SDKs, which call the same endpoint.
 
 ### 6.4 Paying
 

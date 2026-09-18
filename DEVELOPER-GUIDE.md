@@ -692,7 +692,8 @@ One `NativeEventEmitter` channel per family; subscribe via the typed helpers and
 | Helper | Events |
 |---|---|
 | `wallet.onActivationEvent` | `activated` / `timeout` / `error` |
-| `wallet.onTapEvent` | `transactionStarted` / `transactionCompleted` / `activationFailed` (Android tap rail), plus the `requireOnline` / `amountExceedCardLimit` refusals, which also fire from the QR rails on iOS |
+| `wallet.onTapEvent` | `transactionStarted` / `transactionCompleted` / `activationFailed` — Android tap rail only |
+| `wallet.onPaymentRefusal(tur, …)` | `requireOnline` / `amountExceedCardLimit`, **per card**, on every rail that platform has |
 | `merchant.tap.onEvent` | `cardDetected` / `cardContactLost` / `unsupportedCard` / progress / `ended` / `result` |
 | `wallet.onQrExpired` / `merchant.onQrExpired` | one `expired` per rendered QR |
 | `merchant.onTransactionResolved` | one settlement per pending sale — `APPROVED` / `DECLINED` / `FAILED`, never `PENDING` (see §10) |
@@ -701,6 +702,36 @@ One `NativeEventEmitter` channel per family; subscribe via the typed helpers and
 | `wallet.onTransactionResolved` | one settlement per pending **wallet** payment — the payer-side twin of `merchant.onTransactionResolved`, keyed on `transactionHash` (see §8.1) |
 | `wallet.onCardKeyStateChanged` | a card ran out of payment keys, or a refresh replenished them (see §8.1) |
 | `merchant.onMerchantStatusChanged` | the merchant was deactivated, suspended or activated (see §8.1) |
+
+
+##### `wallet.onPaymentRefusal` — a payment refused before anything was sent
+
+A payment can be refused before any proof is built, for two reasons whose **advice differs**. Handlers are registered **per card**: a listener for one `tokenUniqueReference` never hears about another's, which is the same ownership model the Android and iOS SDKs use.
+
+```ts
+useEffect(() => {
+  const sub = wallet.onPaymentRefusal(card.tokenUniqueReference, refusal => {
+    if (refusal.type === 'requireOnline') {
+      // Connecting genuinely fixes this one.
+      show(`Connect to the internet to pay ${format(refusal.amountMinorUnits)}`);
+    } else {
+      // NEVER say "go online" here — a refreshed key carries the same cap, so they would
+      // connect, retry and fail identically.
+      show(refusal.cardLimitMinorUnits
+        ? `This card can pay at most ${format(refusal.cardLimitMinorUnits)} at once`
+        : 'That amount is too large for this card — try a smaller one, or another card');
+    }
+  });
+  return () => sub.remove();
+}, [card.tokenUniqueReference]);
+```
+
+- **Rails:** `TAP`, `CPM_QR` and `MPM_QR` on Android; the two QR rails on iOS, which has no tap-to-pay. Read `refusal.rail` if you need to know which.
+- **These describe *this payment*, not the card.** `Card.requiresOnline` answers the different question "can this card pay anything offline at all?" and stays `false` for a card that can still make smaller payments — so don't grey a card out on the strength of one refusal.
+- **`tokenUniqueReference: null`** means the SDK could not attribute the refusal to a card. Such a refusal reaches **every** registered handler rather than none: the payer was refused either way.
+- `remove()` is idempotent and releases the native registration once that card's last listener has gone.
+
+> **Changed in 1.3.0.** These were `requireOnline` / `amountExceedCardLimit` phases of the SDK-wide `walletTap` event. Every listener heard every card's refusals and had to filter, and a second listener could not be added without the first losing its registration. `walletTap` was also the wrong home: refusals fire on the QR rails, neither of which is a tap. Move a `walletTap` handler's refusal branches to `wallet.onPaymentRefusal` for the card they concern.
 
 ### 8.1 The SDK tells you when stored truth changes
 
@@ -984,7 +1015,8 @@ reads have their own vocabularies (or reject). This is the complete itemisation.
 |---|---|---|---|
 | `wallet.payScannedContext(handle)` (**scan-to-pay, merchant QR**) | `PaymentOutcome.responseStatus`, `.responseCode`, `.responseStatusReason`, `.approved`, `.message` | `'APPROVED'` / `'DECLINED'` / `'FAILED'` / `'PENDING'` / `null` (treat as unresolved) | The full vocabulary; `12` when the merchant's QR lapsed before the push landed, `13` on an amount/currency mismatch. Card-side refusals never reach here — they **reject** with `ONLINE_REQUIRED` / `AMOUNT_EXCEEDS_CARD_LIMIT` / `TOKEN_NOT_ACTIVE` / `AUTH_*` before anything is sent |
 | `wallet.showQrToPay(amountMinorUnits)` (**show-to-pay, customer QR**) | `PaymentQr` — the payload to display | — | — The merchant submits the payment, so the outcome arrives later on the history row via reconciliation. Pre-payment refusals are rejections, not codes |
-| `wallet.onTapEvent(listener)` (**wallet tap, Android only**) | the `walletTap` event's phases, incl. `result.status` | `'APPROVED'` / `'DECLINED'` / `'ERROR'` | — The **offline leg** (what the card told the terminal), not the issuer's authorisation; that lands on the history row with the full triple. `requireOnline` / `amountExceedCardLimit` phases are refusals, not outcomes |
+| `wallet.onTapEvent(listener)` (**wallet tap, Android only**) | the `walletTap` event's phases, incl. `result.status` | `'APPROVED'` / `'DECLINED'` / `'ERROR'` | — The **offline leg** (what the card told the terminal), not the issuer's authorisation; that lands on the history row with the full triple |
+| `wallet.onPaymentRefusal(tur, listener)` | `requireOnline` / `amountExceedCardLimit` | — | — Refused **before anything was sent**, so there is no response code by design. Not an outcome: nothing was attempted |
 | `wallet.inspectScannedQr(payload)` | `ScanInspection` | `Verified` / `Rejected` | **A different vocabulary:** `MALFORMED`, `MISSING_SIGNATURE`, `UNKNOWN_KEY`, `BAD_SIGNATURE`, `EXPIRED`. Every rejection ends the flow — no payment was attempted |
 | `wallet.getTransactions(...)` / `refreshTransactionStatus(hash)` / `reconcilePendingTransactions()` | `TransactionSummary.authorizationStatus`, `.responseCode`, `.responseStatusReason` | `'PENDING'` (still polling) / `'APPROVED'` / `'DECLINED'` / `'FAILED'` / `null` (legacy row) | The full vocabulary; poll answers `09`, `09` + escalated, `25`, or the settled outcome |
 | `wallet.onTransactionResolved(listener)` | `e.status`, `e.responseCode` | `'APPROVED'` / `'DECLINED'` / `'FAILED'` | The settled outcome's code (keyed on `transactionHash`) |

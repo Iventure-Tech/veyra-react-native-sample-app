@@ -27,7 +27,6 @@ export function RegisterMerchantScreen({
     countryCode: '0566',
     accountNumber: SAMPLE_ACCOUNT.accountNumber,
     institutionCode: SAMPLE_ACCOUNT.institutionCode,
-    walletAccountId: SAMPLE_ACCOUNT.walletAccountId,
     bvn: SAMPLE_ACCOUNT.bvn,
     cacNumber: SAMPLE_ACCOUNT.cacNumber,
   });
@@ -51,7 +50,8 @@ export function RegisterMerchantScreen({
         countryCode: form.countryCode,
         accountNumber: form.accountNumber,
         institutionCode: form.institutionCode,
-        walletAccountId: form.walletAccountId || undefined,
+        // The wallet account id is the email entered above.
+        walletAccountId: form.emailAddress || undefined,
         // The BVN goes up for BOTH merchant types — a business's account holder has one too
         // (optional for business).
         bvn: form.bvn || undefined,
@@ -113,7 +113,6 @@ export function RegisterMerchantScreen({
               <Text style={styles.bankCode}>{b.institutionCode}</Text>
             </Pressable>
           ))}
-        <Field label="Wallet account id (optional)" value={form.walletAccountId} onChangeText={set('walletAccountId')} />
         <Button title="Register" onPress={register} />
       </Section>
     </FormScrollView>

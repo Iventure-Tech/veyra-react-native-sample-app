@@ -24,7 +24,7 @@ export function AddCardScreen({
   const [step, setStep] = useState<Step>('form');
   const [banks, setBanks] = useState<Bank[]>([]);
   const [bankName, setBankName] = useState<string | null>(null);
-  // Every field comes from veyra.config — never override walletAccountId with a literal here.
+  // The wallet account id is the email the user enters below — never a literal or a separate field.
   // The SDK hashes that value and the issuer compares it against the email/phone it holds for the
   // account, so a placeholder can never match and costs the digitisation its identity-match signal.
   const [form, setForm] = useState({ ...SAMPLE_ACCOUNT });
@@ -82,7 +82,7 @@ export function AddCardScreen({
       const eligibility = await wallet.verifyAccount({
         accountNumber: form.accountNumber,
         institutionCode: form.institutionCode,
-        walletAccountId: form.walletAccountId,
+        walletAccountId: form.emailAddress,
         accountHolderName: form.accountHolderName,
         accountNumberSource: 'MANUAL',
       });
@@ -96,10 +96,10 @@ export function AddCardScreen({
         accountNumber: form.accountNumber,
         institutionCode: form.institutionCode,
         accountHolderName: form.accountHolderName,
-        walletAccountId: form.walletAccountId,
+        walletAccountId: form.emailAddress,
         emailAddress: form.emailAddress,
         recommendation: 'APPROVE', // your app's own risk decision — never hardcode in production
-        consumerIdentifier: form.walletAccountId,
+        consumerIdentifier: form.emailAddress,
         bvn: form.bvn,
         accountHolderAddress: form.accountHolderAddress,
         mobileNumber: form.mobileNumber,

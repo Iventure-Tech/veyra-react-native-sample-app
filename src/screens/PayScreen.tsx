@@ -89,6 +89,36 @@ export function PayScreen({
     if (!focused) setArmedId(null);
   }, [focused]);
 
+  // A payment refused before anything was sent, for the card that would pay. Registered per card
+  // — a handler hears only its own token — and released when the card changes or the screen goes.
+  //
+  // The two causes are kept apart deliberately, because the advice differs: connecting fixes
+  // `requireOnline`, and can never fix `amountExceedCardLimit`, whose cap is provisioned with the
+  // card. Telling the payer to go online for the second sends them round a loop that cannot work.
+  useEffect(() => {
+    const tur = cards.find((c) => c.id === activeId)?.tokenUniqueReference;
+    if (!tur) return;
+    const sub = wallet.onPaymentRefusal(tur, (refusal) => {
+      if (refusal.type === 'requireOnline') {
+        Alert.alert(
+          'Connect to the internet',
+          `This card needs to refresh before it can pay ${formatAmount(refusal.amountMinorUnits)}.`
+        );
+      } else {
+        Alert.alert(
+          'Amount too large for this card',
+          refusal.cardLimitMinorUnits
+            ? `This card can pay at most ${formatAmount(refusal.cardLimitMinorUnits)} in one payment — try a smaller amount, or another card.`
+            : 'Try a smaller amount, or another card.'
+        );
+      }
+      // A refusal can change what the card list should show (a spent key flips requiresOnline),
+      // so re-read rather than leaving a stale row on the screen taps happen on.
+      reload();
+    });
+    return () => sub.remove();
+  }, [cards, activeId, reload]);
+
   // ── Activation observers ────────────────────────────────────────────────────
   // One per card still awaiting activation. Held in a ref (not state) because the
   // pause/resume/stop effects must act on the current set without re-running when it changes.

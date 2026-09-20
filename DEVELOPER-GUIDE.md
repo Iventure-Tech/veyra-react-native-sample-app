@@ -201,12 +201,6 @@ await Veyra.initialize({
 });
 ```
 
-> **Breaking change:** `allowedCountryCodes` and `allowedMccs` have been **removed** from the
-> wallet config. The SDK now declares the provisioning domain itself — country, currency and
-> merchant category code are fixed platform values, identical on React Native, Android and iOS,
-> and can no longer be supplied or overridden. Delete them from your `initialize` call;
-> `allowedAcquirerIds` and `allowedMerchantIds` are unchanged.
-
 Call it once at app start (this sample does it in `App.tsx` before rendering
 navigation). It is idempotent and safe across native Activity recreation — the SDK
 re-attaches itself. Every call goes through to the native layer and re-applies the

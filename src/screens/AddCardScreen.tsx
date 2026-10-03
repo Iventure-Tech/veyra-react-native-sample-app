@@ -9,6 +9,7 @@ import {
 } from 'veyra-sdk-react-native';
 import type { RootStackParamList } from '../../App';
 import { SAMPLE_ACCOUNT } from '../../veyra.config';
+import { useSession } from '../session';
 import { theme } from '../theme';
 import { Busy, Button, Field, FormScrollView, Section } from '../ui';
 
@@ -27,7 +28,11 @@ export function AddCardScreen({
   // The wallet account id is the email the user enters below — never a literal or a separate field.
   // The SDK hashes that value and the issuer compares it against the email/phone it holds for the
   // account, so a placeholder can never match and costs the digitisation its identity-match signal.
-  const [form, setForm] = useState({ ...SAMPLE_ACCOUNT });
+  // Customer id, account holder name and BVN are as the user enters them (pre-filled, editable).
+  // The customer id is the customer this card is added for: signed in to the SDK on submit, and
+  // sent as the consumer identifier.
+  const { session, signInAs } = useSession();
+  const [form, setForm] = useState({ ...SAMPLE_ACCOUNT, customerId: session.customerId });
   const [tokenRef, setTokenRef] = useState<string | null>(null);
   const [methods, setMethods] = useState<ActivationMethodInfo[]>([]);
   const [code, setCode] = useState('');
@@ -76,8 +81,23 @@ export function AddCardScreen({
   };
 
   const digitise = async () => {
+    const customerId = form.customerId.trim();
+    const missing = !customerId
+      ? 'the customer ID'
+      : !form.accountHolderName.trim()
+        ? 'the account holder name'
+        : !form.bvn.trim()
+          ? 'the BVN'
+          : null;
+    if (missing) {
+      Alert.alert('Missing details', `Enter ${missing}.`);
+      return;
+    }
     setStep('digitising');
     try {
+      // The card belongs to the customer entered here: sign them in first (switching the SDK if
+      // someone else was signed in), so it is added to that customer's wallet.
+      await signInAs(customerId);
       // Eligibility pre-check: a declined account never reaches digitise.
       const eligibility = await wallet.verifyAccount({
         accountNumber: form.accountNumber,
@@ -99,7 +119,7 @@ export function AddCardScreen({
         walletAccountId: form.emailAddress,
         emailAddress: form.emailAddress,
         recommendation: 'APPROVE', // your app's own risk decision — never hardcode in production
-        consumerIdentifier: form.emailAddress,
+        consumerIdentifier: customerId,
         bvn: form.bvn,
         accountHolderAddress: form.accountHolderAddress,
         mobileNumber: form.mobileNumber,
@@ -177,6 +197,7 @@ export function AddCardScreen({
             title={bankName ? `Bank: ${bankName} (${form.institutionCode})` : `Choose bank (${form.institutionCode || 'not set'})`}
             onPress={() => setStep('banks')}
           />
+          <Field label="Customer ID" value={form.customerId} onChangeText={(v) => setForm({ ...form, customerId: v })} />
           <Field label="Account holder name" value={form.accountHolderName} onChangeText={(v) => setForm({ ...form, accountHolderName: v })} />
           <Field label="BVN" value={form.bvn} onChangeText={(v) => setForm({ ...form, bvn: v })} keyboardType="numeric" />
           <Field label="Mobile number" value={form.mobileNumber} onChangeText={(v) => setForm({ ...form, mobileNumber: v })} keyboardType="phone-pad" />

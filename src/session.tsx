@@ -25,6 +25,11 @@ interface SessionApi {
   busy: boolean;
   /** Log the current customer in again: the SDK opens their cards and merchant. */
   signIn(): Promise<void>;
+  /**
+   * Log in `customerId` — any id, not only the demo ones (the add-card form takes it as typed).
+   * Does nothing when that customer is already signed in; otherwise the SDK switches.
+   */
+  signInAs(customerId: string): Promise<void>;
   /** Log in the other demo customer: the SDK stops the first customer's work and switches. */
   switchCustomer(): Promise<void>;
   /** Log out: the SDK stops everything for this customer; their data stays on the device. */
@@ -82,6 +87,10 @@ export function SessionProvider(props: {
     busy,
     signIn: () =>
       run(() => initializeFor(session.customerId), { customerId: session.customerId, signedIn: true }),
+    signInAs: (customerId: string) =>
+      session.signedIn && session.customerId === customerId
+        ? Promise.resolve()
+        : run(() => initializeFor(customerId), { customerId, signedIn: true }),
     switchCustomer: () => {
       const i = DEMO_CUSTOMERS.indexOf(session.customerId as (typeof DEMO_CUSTOMERS)[number]);
       const next = DEMO_CUSTOMERS[(i + 1) % DEMO_CUSTOMERS.length];

@@ -580,7 +580,7 @@ your `paymentAppProviderId` and the SDK stores it from the responses.
 ### 7.2 Tap acceptance
 
 ```ts
-const { sessionId } = await merchant.tap.start({ amountMinorUnits });
+const { sessionId } = await merchant.tap.start({ amountMinorUnits, merchantOrderId: 'ORDER-42' });
 const sub = merchant.tap.onEvent((e) => { … });
 ```
 
@@ -640,12 +640,12 @@ taps toward your launcher activity and away from the session.
 ### 7.3 QR rails
 
 - **Get-paid QR (merchant-presented):** `createPaymentContext(amountMinorUnits,
-  currency?, merchantOrderId?)` → render `mpmPayload`; poll `contextStatus(txRef)`
+  currency | undefined, merchantOrderId)` → render `mpmPayload`; poll `contextStatus(txRef)`
   (`PENDING → IN_FLIGHT → APPROVED/DECLINED/EXPIRED`); `cancelQrExpiry()` on teardown;
   expiry event on `merchant.onQrExpired`.
 - **Charge a customer QR (consumer-presented):** `inspectCustomerQr(payload)` →
   `{ handle, maskedCard, amountMinorUnits }` → confirm on screen →
-  `chargeCustomerQr(handle, merchantOrderId?)`. The outcome carries `responseCode` and
+  `chargeCustomerQr(handle, merchantOrderId)`. The outcome carries `responseCode` and
   `approved` (exactly `responseCode === '00'`) but **no status** — so `approved: false` is
   not a decline by itself: a `68`, `06` or `96` is an unresolved payment. Before telling the
   merchant anything but "approved", read the stated status with
@@ -654,12 +654,14 @@ taps toward your launcher activity and away from the session.
 
 > **The transaction reference is minted by the SDK, not by your app.** It comes back on the
 > outcome as `merchantTransactionReference` (`{terminalId}-YYYYMMDDHHmmssSSS`) and is the key for
-> receipts, `refreshTransactionStatus` and credit confirmation. The optional `merchantOrderId` is
-> the field for **your** order / basket / invoice id: echoed back, never validated for uniqueness
-> and never a lookup key, so it may repeat across attempts of one sale — which is what ties a retry
-> to its original order. **Every merchant-initiated rail takes it** (1.0.15+): `tap.start`
-> (`TapRequest.merchantOrderId`), `createPaymentContext(amountMinorUnits, currency?, merchantOrderId?)`
-> and `chargeCustomerQr(handle, merchantOrderId?)`. `TapRequest.merchantTransactionReference` is
+> receipts, `refreshTransactionStatus` and credit confirmation. `merchantOrderId` is the field for
+> **your** order / basket / invoice id: echoed back, never validated for uniqueness and never a
+> lookup key, so it may repeat across attempts of one sale — which is what ties a retry to its
+> original order. **Every merchant-initiated rail requires it**: `tap.start`
+> (`TapRequest.merchantOrderId`), `createPaymentContext(amountMinorUnits, currency | undefined, merchantOrderId)`
+> (pass `undefined` to keep the default currency) and `chargeCustomerQr(handle, merchantOrderId)`.
+> The types make it mandatory; a blank (or over-255-character) value rejects with
+> `INVALID_REQUEST` before anything is sent, on Android and iOS alike. `TapRequest.merchantTransactionReference` is
 > **gone** — it was an input the SDK ignored once it began minting the reference itself.
 
 ### 7.4 Transactions & receipts
@@ -1002,6 +1004,7 @@ Every rejection is a `VeyraError` with a stable `code` — never string-match me
 | `NOT_SIGNED_IN` | no customer is signed in (after `Veyra.signOut()`) — call `Veyra.initialize` with the customer's `customerId` when they sign in again (§4.1) |
 | `SESSION_REQUIRED` | mount `usePaySession` / `useGetPaidSession` on the payment screen |
 | `MODE_REFUSED` | the other experience's payment is mid-flight; retry after it completes |
+| `INVALID_REQUEST` | refused **before anything was sent** because an argument is invalid — e.g. a blank `merchantOrderId` on `tap.start`, `createPaymentContext` or `chargeCustomerQr`. Fix the call; there is no payment to look up |
 | `NO_NETWORK_CONNECTION` | **the device** has no working internet connection — ask the user to connect and retry. Nothing was sent, so nothing needs undoing. Raised by every backend call in both experiences (wallet: get banks, verify account, digitise, request activation code, activate, token status; merchant: register, refresh/activate/deactivate/update merchant, create payment context, take a payment) |
 | `ONLINE_REQUIRED` | card needs the device online; grey it out, SDK self-heals |
 | `TOKEN_NOT_ACTIVE` | card blocked server-side (e.g. suspended) — not an activation prompt; `status` on the card says why (§6.3) |
@@ -1064,7 +1067,7 @@ flight), so check it **before** you read the status.
 |---|---|---|
 | `NO_NETWORK_CONNECTION` | `VeyraError` code `NO_NETWORK_CONNECTION` | The device has no working internet connection; the call never left it. "Connect and try again" — nothing was charged and nothing is polling. |
 | `MISSING_MANDATORY_CONFIG` | `VeyraError` code `MISSING_MANDATORY_CONFIG` | A required configuration value is absent — environment, client credentials, terminal or merchant id. An integration bug: fix `veyra.config.ts`, or register the merchant (which supplies terminal/merchant ids). |
-| `INVALID_REQUEST` | tap `result.sdkErrorCode` (or `REQUEST_FAILED`) | The request failed validation — amount not greater than zero, or a missing / non-4-digit ISO 4217 currency. Fix the input and call again. (Parameter validation the bridge catches first arrives as `VALIDATION` with `field` instead.) |
+| `INVALID_REQUEST` | `VeyraError` code `INVALID_REQUEST`, or tap `result.sdkErrorCode` | The request failed validation — amount not greater than zero, a missing / non-4-digit ISO 4217 currency, or a blank (or over-255-character) `merchantOrderId`. Fix the input and call again; nothing was sent. (Parameter validation the bridge catches first arrives as `VALIDATION` with `field` instead.) |
 | `PAYMENT_CANCELLED` | tap `result.sdkErrorCode` | The merchant cancelled before a card was tapped. Not an error to report — return to the amount screen. |
 | `TRANSACTION_IN_PROGRESS` | tap `result.sdkErrorCode` | Another payment is still running. Wait for its result; disable the pay button while one is live. |
 | `MERCHANT_NOT_ACTIVE` | tap `result.sdkErrorCode` | The merchant account is not `ACTIVE`. Gate your get-paid screen on the registered + active check and refresh the status while awaiting activation. |
@@ -1356,9 +1359,9 @@ answers that *arrive*, which is every decision and every stated refusal.
 | Merchant registration + QR rails | ✅ | ✅ |
 | Receipt QR | PNG (`qrCodeBase64`) | payload (`qrPayload`) |
 | `appleTeamId` | — | required |
-| `merchantOrderId` on `chargeCustomerQr` | ✅ | ✅ |
-| `merchantOrderId` on `tap.start` | ✅ | — (accepted, not yet passed through) |
-| `merchantOrderId` on `createPaymentContext` | ✅ | ✅ |
+| `merchantOrderId` (required) on `chargeCustomerQr` | ✅ | ✅ |
+| `merchantOrderId` (required) on `tap.start` | ✅ | ✅ |
+| `merchantOrderId` (required) on `createPaymentContext` | ✅ | ✅ |
 | Pending-outcome polling (backoff, 30-day stop) | ✅ | ✅ |
 | …but its lifetime | runs in the background via WorkManager | **app-scoped only** — no OS background execution |
 

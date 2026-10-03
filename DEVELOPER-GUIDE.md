@@ -270,9 +270,13 @@ await Veyra.initialize({ customerId: otherCustomerId, softpos, wallet });
 3. **Handle `NOT_SIGNED_IN`** (§9) — raised by any call made while signed out.
 4. **Remove `merchant.clearStored()`** — it no longer exists. A successful
    `merchant.register` overwrites the stored merchant, so there is nothing to clear first.
-5. **Expect customers to start over once.** Data stored by 1.x is erased on the first
+5. **Pass `merchantOrderId` on every merchant payment** — it is now required on
+   `tap.start({ …, merchantOrderId })`, `createPaymentContext(amount, currency | undefined,
+   merchantOrderId)` and `chargeCustomerQr(handle, merchantOrderId)`. A blank one rejects with
+   the new `INVALID_REQUEST` code before anything is sent.
+6. **Expect customers to start over once.** Data stored by 1.x is erased on the first
    launch of 2.0.0: customers add their cards again, and merchants register again.
-6. **Retype your config** if you keep it apart from the customer, e.g.
+7. **Retype your config** if you keep it apart from the customer, e.g.
    `Omit<VeyraConfig, 'customerId'>`.
 
 ## 5. Sessions — how payment screens work in React Native

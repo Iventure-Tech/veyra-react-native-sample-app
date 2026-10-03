@@ -82,13 +82,18 @@ export function AddCardScreen({
 
   const digitise = async () => {
     const customerId = form.customerId.trim();
+    // Also the wallet account id: the SDK hashes it and the issuer compares that hash with the
+    // email/phone registered on the account.
+    const email = form.emailAddress.trim();
     const missing = !customerId
       ? 'the customer ID'
       : !form.accountHolderName.trim()
         ? 'the account holder name'
         : !form.bvn.trim()
           ? 'the BVN'
-          : null;
+          : !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)
+            ? 'a valid email'
+            : null;
     if (missing) {
       Alert.alert('Missing details', `Enter ${missing}.`);
       return;
@@ -102,7 +107,7 @@ export function AddCardScreen({
       const eligibility = await wallet.verifyAccount({
         accountNumber: form.accountNumber,
         institutionCode: form.institutionCode,
-        walletAccountId: form.emailAddress,
+        walletAccountId: email,
         accountHolderName: form.accountHolderName,
         accountNumberSource: 'MANUAL',
       });
@@ -116,8 +121,8 @@ export function AddCardScreen({
         accountNumber: form.accountNumber,
         institutionCode: form.institutionCode,
         accountHolderName: form.accountHolderName,
-        walletAccountId: form.emailAddress,
-        emailAddress: form.emailAddress,
+        walletAccountId: email,
+        emailAddress: email,
         recommendation: 'APPROVE', // your app's own risk decision — never hardcode in production
         consumerIdentifier: customerId,
         bvn: form.bvn,
@@ -200,8 +205,8 @@ export function AddCardScreen({
           <Field label="Customer ID" value={form.customerId} onChangeText={(v) => setForm({ ...form, customerId: v })} />
           <Field label="Account holder name" value={form.accountHolderName} onChangeText={(v) => setForm({ ...form, accountHolderName: v })} />
           <Field label="BVN" value={form.bvn} onChangeText={(v) => setForm({ ...form, bvn: v })} keyboardType="numeric" />
-          <Field label="Mobile number" value={form.mobileNumber} onChangeText={(v) => setForm({ ...form, mobileNumber: v })} keyboardType="phone-pad" />
           <Field label="Email" value={form.emailAddress} onChangeText={(v) => setForm({ ...form, emailAddress: v })} keyboardType="email-address" />
+          <Field label="Mobile number" value={form.mobileNumber} onChangeText={(v) => setForm({ ...form, mobileNumber: v })} keyboardType="phone-pad" />
           <Field label="Address" value={form.accountHolderAddress} onChangeText={(v) => setForm({ ...form, accountHolderAddress: v })} />
           <Button title="Add card" onPress={digitise} />
         </Section>

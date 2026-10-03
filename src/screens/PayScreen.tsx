@@ -104,12 +104,18 @@ export function PayScreen({
           'Connect to the internet',
           `This card needs to refresh before it can pay ${formatAmount(refusal.amountMinorUnits)}.`
         );
-      } else {
+      } else if (refusal.type === 'amountExceedCardLimit') {
         Alert.alert(
           'Amount too large for this card',
           refusal.cardLimitMinorUnits
             ? `This card can pay at most ${formatAmount(refusal.cardLimitMinorUnits)} in one payment — try a smaller amount, or another card.`
             : 'Try a smaller amount, or another card.'
+        );
+      } else {
+        // deviceNotBound: neither going online nor a smaller amount helps.
+        Alert.alert(
+          "This card can't pay on this phone",
+          'It was added on another device or before the app was reinstalled. Remove it and add it again on this phone.'
         );
       }
       // A refusal can change what the card list should show (a spent key flips requiresOnline),

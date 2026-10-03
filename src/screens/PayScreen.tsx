@@ -9,6 +9,7 @@ import {
   type WalletTapEvent,
 } from 'veyra-sdk-react-native';
 import type { RootStackParamList } from '../../App';
+import { DEVICE_NOT_BOUND_MESSAGE, DEVICE_NOT_BOUND_TITLE } from '../paymentResult';
 import { theme } from '../theme';
 import { Busy, Button, formatAmount, Section } from '../ui';
 
@@ -113,10 +114,7 @@ export function PayScreen({
         );
       } else {
         // deviceNotBound: neither going online nor a smaller amount helps.
-        Alert.alert(
-          "This card can't pay on this phone",
-          'It was added on another device or before the app was reinstalled. Remove it and add it again on this phone.'
-        );
+        Alert.alert(DEVICE_NOT_BOUND_TITLE, DEVICE_NOT_BOUND_MESSAGE);
       }
       // A refusal can change what the card list should show (a spent key flips requiresOnline),
       // so re-read rather than leaving a stale row on the screen taps happen on.

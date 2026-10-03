@@ -61,7 +61,7 @@ export function ScanToPayScreen({
       }
       navigation.replace(
         'PaymentResult',
-        walletPaymentFailureToParams(err.message, inspection.amountMinorUnits)
+        walletPaymentFailureToParams(err.message, inspection.amountMinorUnits, err.code)
       );
     }
   };

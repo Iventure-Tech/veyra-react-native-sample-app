@@ -242,10 +242,28 @@ export function walletPaymentToParams(
 }
 
 /** The payer's payment failed before an outcome existed (declined by the SDK, network…). */
+/**
+ * What the payer is told when the backend will not give a card payment keys on this phone (it
+ * was added on another device, or before the app was reinstalled). One wording on every rail:
+ * neither going online nor a smaller amount helps, so the advice is to add the card again.
+ */
+export const DEVICE_NOT_BOUND_TITLE = "This card can't pay on this phone";
+export const DEVICE_NOT_BOUND_MESSAGE =
+  'It was added on another device or before the app was reinstalled. Remove it and add it again on this phone.';
+
 export function walletPaymentFailureToParams(
   message: string,
-  amountMinorUnits: number
+  amountMinorUnits: number,
+  code?: string
 ): PaymentResultParams {
+  if (code === 'DEVICE_NOT_BOUND') {
+    return {
+      outcome: 'declined',
+      title: DEVICE_NOT_BOUND_TITLE,
+      message: DEVICE_NOT_BOUND_MESSAGE,
+      amountMinorUnits,
+    };
+  }
   return {
     outcome: 'declined',
     title: 'Declined',

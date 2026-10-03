@@ -5,6 +5,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import QRCode from 'react-native-qrcode-svg';
 import { wallet, usePaySession, type PaymentQr, type VeyraError } from 'veyra-sdk-react-native';
 import type { RootStackParamList } from '../../App';
+import { DEVICE_NOT_BOUND_MESSAGE, DEVICE_NOT_BOUND_TITLE } from '../paymentResult';
 import { theme } from '../theme';
 import { QrTile, Busy, Button, formatAmount, Field, Section } from '../ui';
 
@@ -83,6 +84,10 @@ export function ShowToPayScreen({
       // The customer dismissing the sheet is not an error worth a dialog — they just chose not
       // to pay. Everything else is worth showing.
       if (err.code === 'AUTH_CANCELLED') return;
+      if (err.code === 'DEVICE_NOT_BOUND') {
+        Alert.alert(DEVICE_NOT_BOUND_TITLE, DEVICE_NOT_BOUND_MESSAGE);
+        return;
+      }
       Alert.alert('Cannot show QR', err.message);
     }
   };

@@ -12,6 +12,8 @@ import type {
 } from 'veyra-sdk-react-native';
 import {
   AUTO_RETURN_MS,
+  DEVICE_NOT_BOUND_MESSAGE,
+  DEVICE_NOT_BOUND_TITLE,
   contextSettlementToParams,
   cpmChargeFailureToParams,
   cpmChargeToParams,
@@ -243,6 +245,17 @@ describe('walletPaymentToParams', () => {
   it('never offers a receipt — a wallet cannot fetch the merchant copy', () => {
     expect(walletPaymentToParams(outcome(), 300).receiptFor).toBeUndefined();
     expect(walletPaymentFailureToParams('boom', 300).receiptFor).toBeUndefined();
+  });
+
+  it('tells the payer to add the card again when it is not bound to this phone', () => {
+    const params = walletPaymentFailureToParams('DEVICE_NOT_BOUND: refused', 300, 'DEVICE_NOT_BOUND');
+    expect(params.outcome).toBe('declined');
+    expect(params.title).toBe(DEVICE_NOT_BOUND_TITLE);
+    expect(params.message).toBe(DEVICE_NOT_BOUND_MESSAGE);
+  });
+
+  it("keeps the SDK's message for every other failure", () => {
+    expect(walletPaymentFailureToParams('boom', 300, 'AUTH_FAILED').message).toBe('boom');
   });
 
   it("shows the gateway's merchant name and location", () => {

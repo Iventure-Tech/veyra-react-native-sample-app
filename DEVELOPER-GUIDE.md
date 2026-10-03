@@ -102,7 +102,15 @@ cp veyra.config.example.ts veyra.config.ts
 # token requestor id (and your Apple Team ID for iOS)
 ```
 
-`veyra.config.ts` is gitignored — real credentials never get committed.
+`veyra.config.ts` is gitignored — real credentials never get committed. It holds
+everything **except** the customer: the app adds `customerId` when it initialises (§4.1).
+If you have a `veyra.config.ts` from a 1.x checkout, change its type to
+`Omit<VeyraConfig, 'customerId'>` as in `veyra.config.example.ts`.
+
+The sample "logs in" one of two demo customers, `demo-customer-1` and `demo-customer-2`.
+Its login session lives in memory only (the sample has no storage dependency), so every
+launch starts signed in as `demo-customer-1`; Home's customer bar switches between them
+and signs out.
 
 ### Android
 
@@ -176,9 +184,14 @@ cp veyra.config.example.ts veyra.config.ts
 
 **First sanity check:** the Home screen's *NFC mode* readout should say `NONE`, and flip
 to `WALLET` / `SOFTPOS` only while the Pay / Get-paid screens are focused — that is the
-session model (§5) working.
+session model (§5) working. Above it, the customer bar should read *Signed in as
+demo-customer-1*.
 
 ## 4. Initialise
+
+> **Breaking change (2.0.0):** `customerId` is required on every `Veyra.initialize`, and
+> `merchant.clearStored()` is gone. See §4.1 for the customer model and §4.2 for the
+> migration checklist.
 
 > **Breaking change:** `softpos` now requires a `paymentAppProviderId` — the globally unique
 > identifier issued to your organisation at onboarding, the same value the `wallet` block
@@ -190,6 +203,7 @@ session model (§5) working.
 import Veyra from 'veyra-sdk-react-native';
 
 await Veyra.initialize({
+  customerId,                              // the customer your app has signed in
   softpos: { environment: 'TEST', clientId, clientSecret, paymentAppProviderId },
   wallet: {
     environment: 'TEST',
@@ -201,12 +215,65 @@ await Veyra.initialize({
 });
 ```
 
-Call it once at app start (this sample does it in `App.tsx` before rendering
-navigation). It is idempotent and safe across native Activity recreation — the SDK
-re-attaches itself. Every call goes through to the native layer and re-applies the
+Call it at every app start with the customer your app has signed in (this sample does it
+in `src/session.tsx`, before rendering navigation). It is idempotent for the same customer
+and safe across native Activity recreation — the SDK re-attaches itself. Every call goes through to the native layer and re-applies the
 configuration (there is no JS-side memo), so a call that rejects — no network at cold
 start, say — is recovered by simply calling it again; the SDK does not retry on its own.
 All SDK failures reject with a typed `VeyraError` (§9).
+
+### 4.1 Customers: signing in, signing out, switching
+
+The SDK keeps everything — cards, the merchant, history, receipts — **per customer**, and it
+never remembers who is signed in. Who is logged in is your app's to know: it is part of
+your own login session, and you tell the SDK on every launch.
+
+| Your app's moment | Call | What the SDK does |
+|---|---|---|
+| App starts, a customer is signed in | `Veyra.initialize({ customerId, softpos, wallet })` | opens that customer's data |
+| App starts, nobody is signed in | nothing | stays signed out — every call rejects with `NOT_SIGNED_IN` |
+| Customer logs in | `Veyra.initialize({ customerId, … })` | opens that customer's data |
+| Same customer again (relaunch, Activity recreated) | `Veyra.initialize({ customerId, … })` | nothing is stopped — idempotent |
+| A different customer logs in (switch) | `Veyra.initialize({ customerId: other, … })` | stops the previous customer's work, then opens the new customer's data |
+| Customer logs out | `Veyra.signOut()` | stops everything for that customer; their data **stays on the device** (keys kept) for when they sign in again |
+
+```ts
+import Veyra from 'veyra-sdk-react-native';
+
+// on launch, if your login session has a customer
+await Veyra.initialize({ customerId: session.customerId, softpos, wallet });
+
+// log out
+await Veyra.signOut();
+
+// switch — just initialise with the other customer
+await Veyra.initialize({ customerId: otherCustomerId, softpos, wallet });
+```
+
+- **`customerId` is your identifier** for the logged-in customer — any stable string your
+  app already has. It never leaves the device.
+- **After `Veyra.signOut()`** every call rejects with `NOT_SIGNED_IN` until the next
+  `Veyra.initialize`. Disable your payment entry points while signed out (this sample
+  greys out Pay, Get paid and merchant settings on Home).
+- **Event subscriptions survive** sign-in, switch and sign-out: the bridge re-registers its
+  native observers on every `initialize`, so `wallet.on…` / `merchant.on…` listeners you
+  added once keep firing — now for the newly signed-in customer.
+- **Android — tap with the app not running.** If the app process has not initialised
+  (killed, or the phone restarted and the app not yet opened), a terminal tap is answered
+  "application not found" until your app initialises with the customer.
+
+### 4.2 Migrating from 1.x to 2.0.0
+
+1. **Pass `customerId` to every `Veyra.initialize`** — the signed-in customer, on every
+   launch. Do not initialise while nobody is signed in.
+2. **Call `Veyra.signOut()` when the customer logs out** of your app.
+3. **Handle `NOT_SIGNED_IN`** (§9) — raised by any call made while signed out.
+4. **Remove `merchant.clearStored()`** — it no longer exists. A successful
+   `merchant.register` overwrites the stored merchant, so there is nothing to clear first.
+5. **Expect customers to start over once.** Data stored by 1.x is erased on the first
+   launch of 2.0.0: customers add their cards again, and merchants register again.
+6. **Retype your config** if you keep it apart from the customer, e.g.
+   `Omit<VeyraConfig, 'customerId'>`.
 
 ## 5. Sessions — how payment screens work in React Native
 
@@ -505,7 +572,8 @@ personal and optional for business — the account holder behind a business has 
 CAC number for business; optional `walletAccountId`, stored verbatim by the gateway),
 `getSettlementBanks()`, `isRegistered()`, `getStored()`, `refreshStatus()`,
 `activate()` / `deactivate()`, `update(…)` (also accepts optional `walletAccountId` and
-`bvn`), `clearStored()` (local only). Gate acceptance on the stored merchant's status
+`bvn`). The merchant belongs to the signed-in customer (§4.1); a successful `register`
+overwrites the stored merchant — there is no `clearStored()` in 2.0.0. Gate acceptance on the stored merchant's status
 being `ACTIVE`. There is no `acquirerId` field anywhere: the gateway resolves it from
 your `paymentAppProviderId` and the SDK stores it from the responses.
 
@@ -931,6 +999,7 @@ Every rejection is a `VeyraError` with a stable `code` — never string-match me
 | Code | Meaning / action |
 |---|---|
 | `NOT_CONFIGURED` | call `Veyra.initialize` first |
+| `NOT_SIGNED_IN` | no customer is signed in (after `Veyra.signOut()`) — call `Veyra.initialize` with the customer's `customerId` when they sign in again (§4.1) |
 | `SESSION_REQUIRED` | mount `usePaySession` / `useGetPaidSession` on the payment screen |
 | `MODE_REFUSED` | the other experience's payment is mid-flight; retry after it completes |
 | `NO_NETWORK_CONNECTION` | **the device** has no working internet connection — ask the user to connect and retry. Nothing was sent, so nothing needs undoing. Raised by every backend call in both experiences (wallet: get banks, verify account, digitise, request activation code, activate, token status; merchant: register, refresh/activate/deactivate/update merchant, create payment context, take a payment) |
@@ -1281,6 +1350,7 @@ answers that *arrive*, which is every decision and every stated refusal.
 | Capability | Android | iOS |
 |---|---|---|
 | Wallet tap-to-pay (HCE) | ✅ | ❌ (Apple policy — pay by QR) |
+| …with the app process not initialised (killed / phone restarted) | answered "application not found" until the app initialises with the customer | — |
 | Tap acceptance | ✅ | ✅ (NFC-capable iPhones) |
 | Scan-to-pay / Show-QR / history / receipts | ✅ | ✅ |
 | Merchant registration + QR rails | ✅ | ✅ |
@@ -1316,5 +1386,13 @@ the 30-day window is measured from the transaction date rather than from time sp
   expected: any NFC phone answers at protocol level; nothing is charged and no data is
   read. Only your armed pay screen presents an actual card.
 - **Tap works on first launch, then stops after reload** — call `Veyra.initialize`
-  again on app start (this sample's `App.tsx` pattern); the SDK re-attaches to the
-  recreated native screen.
+  (with the signed-in `customerId`) again on app start (this sample's `src/session.tsx`
+  pattern); the SDK re-attaches to the recreated native screen.
+- **Every call rejects with `NOT_SIGNED_IN`** — `Veyra.signOut()` was called, or your
+  app never initialised this launch. Initialise with the signed-in customer (§4.1).
+- **Cards or merchant "disappeared" after upgrading to 2.0.0** — expected once: 1.x data
+  is erased on first launch, and 2.0.0 data is per customer. Check you pass the same
+  `customerId` as before; then add cards / register again (§4.2).
+- **Android: terminal says "application not found" while the app is closed** — the app
+  process has not initialised since it was killed or the phone restarted. Open the app;
+  once it initialises with the customer, taps are answered again.

@@ -9,8 +9,9 @@ import { Busy, Button, Field, FormScrollView, Section } from '../ui';
 
 /**
  * Merchant settings: profile view + edit (updateMerchant), backend status controls
- * (refresh / activate / deactivate) and clearing the stored merchant — the RN
- * counterpart of the native samples' settings surface.
+ * (refresh / activate / deactivate) — the RN counterpart of the native samples' settings
+ * surface. There is no "clear" action: the merchant is the signed-in customer's, and a
+ * successful registration overwrites it.
  */
 export function MerchantSettingsScreen({
   navigation,
@@ -131,19 +132,6 @@ export function MerchantSettingsScreen({
         <Button title="Refresh status" disabled={!!busy} onPress={() => run('Refresh', () => merchant.refreshStatus())} />
         <Button title="Activate" disabled={!!busy} onPress={() => run('Activate', () => merchant.activate())} />
         <Button title="Deactivate" destructive disabled={!!busy} onPress={() => run('Deactivate', () => merchant.deactivate())} />
-      </Section>
-      <Section title="This device">
-        <Button
-          title="Clear stored merchant"
-          destructive
-          disabled={!!busy}
-          onPress={() =>
-            Alert.alert('Clear stored merchant?', 'Local only — the backend registration is unaffected.', [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Clear', style: 'destructive', onPress: () => run('Clear', () => merchant.clearStored()) },
-            ])
-          }
-        />
       </Section>
     </ScrollView>
   );

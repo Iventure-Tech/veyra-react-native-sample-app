@@ -85,11 +85,13 @@ export function AddCardScreen({
     // Also the wallet account id: the SDK hashes it and the issuer compares that hash with the
     // email/phone registered on the account.
     const email = form.emailAddress.trim();
+    const accountHolderName = form.accountHolderName.trim();
+    const bvn = form.bvn.trim();
     const missing = !customerId
       ? 'the customer ID'
-      : !form.accountHolderName.trim()
+      : !accountHolderName
         ? 'the account holder name'
-        : !form.bvn.trim()
+        : !bvn
           ? 'the BVN'
           : !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)
             ? 'a valid email'
@@ -108,7 +110,7 @@ export function AddCardScreen({
         accountNumber: form.accountNumber,
         institutionCode: form.institutionCode,
         walletAccountId: email,
-        accountHolderName: form.accountHolderName,
+        accountHolderName,
         accountNumberSource: 'MANUAL',
       });
       if (!eligibility.isApproved) {
@@ -120,12 +122,12 @@ export function AddCardScreen({
       const result = await wallet.digitise({
         accountNumber: form.accountNumber,
         institutionCode: form.institutionCode,
-        accountHolderName: form.accountHolderName,
+        accountHolderName,
         walletAccountId: email,
         emailAddress: email,
         recommendation: 'APPROVE', // your app's own risk decision — never hardcode in production
         consumerIdentifier: customerId,
-        bvn: form.bvn,
+        bvn,
         accountHolderAddress: form.accountHolderAddress,
         mobileNumber: form.mobileNumber,
         accountNumberSource: 'MANUAL',

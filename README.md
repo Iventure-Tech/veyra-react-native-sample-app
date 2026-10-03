@@ -86,7 +86,9 @@ catalogue — lives in this repository.
 
 | Path | What it shows |
 |---|---|
-| `App.tsx` | SDK configuration & initialisation, navigation |
+| `App.tsx` | Navigation; wraps the app in the session provider |
+| `src/session.tsx` | The app's own login session — initialises the SDK with the signed-in customer on every launch; switch and sign out |
+| `src/screens/HomeScreen.tsx` | Customer bar (signed in as / Switch / Sign out / Sign in); payment entry points disabled while signed out |
 | `src/screens/GetPaidScreen.tsx` | The merchant flow — `useGetPaidSession` + all three acceptance rails |
 | `src/screens/PayScreen.tsx` | The wallet flow — `usePaySession`, card states, tap arming |
 | `src/screens/AddCardScreen.tsx` | Digitisation + activation |

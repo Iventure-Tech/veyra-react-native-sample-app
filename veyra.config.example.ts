@@ -4,7 +4,9 @@
  */
 import type { VeyraConfig } from 'veyra-sdk-react-native';
 
-export const VEYRA_CONFIG: VeyraConfig = {
+// Everything except the customer: the app adds `customerId` (whoever it has signed in) when it
+// calls Veyra.initialize — see src/session.tsx.
+export const VEYRA_CONFIG: Omit<VeyraConfig, 'customerId'> = {
   softpos: {
     environment: 'TEST',
     clientId: 'your-client-id',

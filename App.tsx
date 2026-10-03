@@ -1,9 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { StatusBar, StyleSheet, Text, View } from 'react-native';
 import { DarkTheme, NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import Veyra from 'veyra-sdk-react-native';
-import { VEYRA_CONFIG } from './veyra.config';
 import { HomeScreen } from './src/screens/HomeScreen';
 import { GetPaidScreen } from './src/screens/GetPaidScreen';
 import { RegisterMerchantScreen } from './src/screens/RegisterMerchantScreen';
@@ -18,6 +16,7 @@ import { MerchantSettingsScreen } from './src/screens/MerchantSettingsScreen';
 import { PaymentResultScreen } from './src/screens/PaymentResultScreen';
 import type { PaymentResultParams } from './src/paymentResult';
 import { theme } from './src/theme';
+import { SessionProvider } from './src/session';
 
 // Veyra Bank neo-bank theme (matches the native samples: black + crimson accent).
 const navTheme = {
@@ -52,55 +51,44 @@ export type RootStackParamList = {
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function App(): React.JSX.Element {
-  const [ready, setReady] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    Veyra.initialize(VEYRA_CONFIG)
-      .then(() => setReady(true))
-      .catch((e: Error) => setError(e.message));
-  }, []);
-
-  if (error) {
-    return (
-      <View style={styles.center}>
-        <Text style={styles.error}>SDK initialisation failed</Text>
-        <Text style={styles.errorDetail}>{error}</Text>
-      </View>
-    );
-  }
-  if (!ready) {
-    return (
-      <View style={styles.center}>
-        <Text style={styles.errorDetail}>Starting Veyra…</Text>
-      </View>
-    );
-  }
-
+  // The session provider initialises the SDK with the signed-in customer on every launch.
   return (
-    <NavigationContainer theme={navTheme}>
-      <StatusBar barStyle="light-content" backgroundColor={theme.bankBg} />
-      <Stack.Navigator initialRouteName="Home">
-        <Stack.Screen name="Home" component={HomeScreen} options={{ title: 'Veyra Bank' }} />
-        <Stack.Screen name="GetPaid" component={GetPaidScreen} options={{ title: 'Get paid' }} />
-        <Stack.Screen name="RegisterMerchant" component={RegisterMerchantScreen} options={{ title: 'Register merchant' }} />
-        <Stack.Screen name="MerchantTransactions" component={MerchantTransactionsScreen} options={{ title: 'Merchant transactions' }} />
-        <Stack.Screen name="MerchantSettings" component={MerchantSettingsScreen} options={{ title: 'Merchant settings' }} />
-        <Stack.Screen name="Pay" component={PayScreen} options={{ title: 'Pay' }} />
-        <Stack.Screen name="AddCard" component={AddCardScreen} options={{ title: 'Add card' }} />
-        <Stack.Screen name="ScanToPay" component={ScanToPayScreen} options={{ title: 'Scan to pay' }} />
-        <Stack.Screen name="ShowToPay" component={ShowToPayScreen} options={{ title: 'Show QR to pay' }} />
-        <Stack.Screen name="WalletTransactions" component={WalletTransactionsScreen} options={{ title: 'Transactions' }} />
-        <Stack.Screen name="WalletReceipts" component={WalletReceiptsScreen} options={{ title: 'Receipts' }} />
-        <Stack.Screen
-          name="PaymentResult"
-          component={PaymentResultScreen}
-          // A settled payment is not something to back out of: the only ways off the
-          // result are Done, the receipt, or the auto-return — as on the native pages.
-          options={{ title: 'Payment result', headerBackVisible: false, gestureEnabled: false }}
-        />
-      </Stack.Navigator>
-    </NavigationContainer>
+    <SessionProvider
+      starting={
+        <View style={styles.center}>
+          <Text style={styles.errorDetail}>Starting Veyra…</Text>
+        </View>
+      }
+      failed={(error) => (
+        <View style={styles.center}>
+          <Text style={styles.error}>SDK initialisation failed</Text>
+          <Text style={styles.errorDetail}>{error}</Text>
+        </View>
+      )}>
+      <NavigationContainer theme={navTheme}>
+        <StatusBar barStyle="light-content" backgroundColor={theme.bankBg} />
+        <Stack.Navigator initialRouteName="Home">
+          <Stack.Screen name="Home" component={HomeScreen} options={{ title: 'Veyra Bank' }} />
+          <Stack.Screen name="GetPaid" component={GetPaidScreen} options={{ title: 'Get paid' }} />
+          <Stack.Screen name="RegisterMerchant" component={RegisterMerchantScreen} options={{ title: 'Register merchant' }} />
+          <Stack.Screen name="MerchantTransactions" component={MerchantTransactionsScreen} options={{ title: 'Merchant transactions' }} />
+          <Stack.Screen name="MerchantSettings" component={MerchantSettingsScreen} options={{ title: 'Merchant settings' }} />
+          <Stack.Screen name="Pay" component={PayScreen} options={{ title: 'Pay' }} />
+          <Stack.Screen name="AddCard" component={AddCardScreen} options={{ title: 'Add card' }} />
+          <Stack.Screen name="ScanToPay" component={ScanToPayScreen} options={{ title: 'Scan to pay' }} />
+          <Stack.Screen name="ShowToPay" component={ShowToPayScreen} options={{ title: 'Show QR to pay' }} />
+          <Stack.Screen name="WalletTransactions" component={WalletTransactionsScreen} options={{ title: 'Transactions' }} />
+          <Stack.Screen name="WalletReceipts" component={WalletReceiptsScreen} options={{ title: 'Receipts' }} />
+          <Stack.Screen
+            name="PaymentResult"
+            component={PaymentResultScreen}
+            // A settled payment is not something to back out of: the only ways off the
+            // result are Done, the receipt, or the auto-return — as on the native pages.
+            options={{ title: 'Payment result', headerBackVisible: false, gestureEnabled: false }}
+          />
+        </Stack.Navigator>
+      </NavigationContainer>
+    </SessionProvider>
   );
 }
 

@@ -303,9 +303,14 @@ track what you already observe instead of re-issuing on every render. See `PaySc
 1. `requiresActivation` — offer the activation flow.
 2. `requiresOnline` — **grey the card out and disable pay affordances**; the SDK
    restores it by itself once the device is online. Nothing to call.
-3. `!isActive` — blocked server-side; `status` says why on both platforms (`SUSPENDED`:
+3. `deviceNotBound` — the card was added on a different device (or on this phone before the app
+   was reinstalled), so the backend will not issue it payment keys here; **tell the customer to
+   remove the card and add it again on this phone** — going online or paying a smaller amount
+   does not help. The SDK has stopped requesting keys for it, `requiresOnline` is always `false`
+   while this is set, and it clears only when the card is removed.
+4. `!isActive` — blocked server-side; `status` says why on both platforms (`SUSPENDED`:
    "contact your bank" · `PENDING_ACTIVATION`: "activate this card" · `EXPIRED`: "re-add the card").
-4. Otherwise payable.
+5. Otherwise payable.
 
 `wallet.getActiveCard()` → `Card | null` reads the currently selected card — the counterpart to
 `setActiveCard`, and the way a screen answers "which card would pay right now?" without inferring it
@@ -796,7 +801,7 @@ One `NativeEventEmitter` channel per family; subscribe via the typed helpers and
 |---|---|
 | `wallet.onActivationEvent` | `activated` / `timeout` / `error` |
 | `wallet.onTapEvent` | `transactionStarted` / `transactionCompleted` / `activationFailed` — Android tap rail only |
-| `wallet.onPaymentRefusal(tur, …)` | `requireOnline` / `amountExceedCardLimit`, **per card**, on every rail that platform has |
+| `wallet.onPaymentRefusal(tur, …)` | `requireOnline` / `amountExceedCardLimit` / `deviceNotBound`, **per card**, on every rail that platform has |
 | `merchant.tap.onEvent` | `cardDetected` / `cardContactLost` / `unsupportedCard` / progress / `ended` / `result` |
 | `wallet.onQrExpired` / `merchant.onQrExpired` | one `expired` per rendered QR |
 | `merchant.onTransactionResolved` | one settlement per pending sale — `APPROVED` / `DECLINED` / `FAILED`, never `PENDING` (see §7.6) |
@@ -809,7 +814,7 @@ One `NativeEventEmitter` channel per family; subscribe via the typed helpers and
 
 ##### `wallet.onPaymentRefusal` — a payment refused before anything was sent
 
-A payment can be refused before any proof is built, for two reasons whose **advice differs**. Handlers are registered **per card**: a listener for one `tokenUniqueReference` never hears about another's, which is the same ownership model the Android and iOS SDKs use.
+A payment can be refused before any proof is built, for three reasons whose **advice differs**. Handlers are registered **per card**: a listener for one `tokenUniqueReference` never hears about another's, which is the same ownership model the Android and iOS SDKs use.
 
 ```ts
 useEffect(() => {
@@ -817,6 +822,10 @@ useEffect(() => {
     if (refusal.type === 'requireOnline') {
       // Connecting genuinely fixes this one.
       show(`Connect to the internet to pay ${format(refusal.amountMinorUnits)}`);
+    } else if (refusal.type === 'deviceNotBound') {
+      // Neither connecting nor a smaller amount helps: this card was added on another device
+      // (or before a reinstall). The only remedy is to remove it and add it again here.
+      show('This card was added on another device — remove it and add it again on this phone');
     } else {
       // NEVER say "go online" here — a refreshed key carries the same cap, so they would
       // connect, retry and fail identically.
@@ -831,6 +840,7 @@ useEffect(() => {
 
 - **Rails:** `TAP`, `CPM_QR` and `MPM_QR` on Android; the two QR rails on iOS, which has no tap-to-pay. Read `refusal.rail` if you need to know which.
 - **These describe *this payment*, not the card.** `Card.requiresOnline` answers the different question "can this card pay anything offline at all?" and stays `false` for a card that can still make smaller payments — so don't grey a card out on the strength of one refusal.
+- **`deviceNotBound` is the exception — it is a card state too.** The backend issues a card's payment keys only to the device the card was added on; a request from another device, or from this phone after the app was reinstalled, is refused. The SDK remembers the refusal for that card, stops requesting keys for it, and sets `Card.deviceNotBound` (§6.3). The shape is `{ type: 'deviceNotBound'; tokenId; tokenUniqueReference; amountMinorUnits; rail; message }`, with `message` prefixed `DEVICE_NOT_BOUND`. Fires on both platforms (`TAP` on Android only).
 - **`tokenUniqueReference: null`** means the SDK could not attribute the refusal to a card. Such a refusal reaches **every** registered handler rather than none: the payer was refused either way.
 - `remove()` is idempotent and releases the native registration once that card's last listener has gone.
 
@@ -868,7 +878,11 @@ const subs = [
     // is the merchant's side of a payment and keys on a reference a wallet never sees.
     finishPendingRow(e.transactionHash, e.status, e.reason);
   }),
-  wallet.onCardKeyStateChanged((e) => setNeedsOnline(e.tokenUniqueReference, e.requiresOnline)),
+  wallet.onCardKeyStateChanged((e) => {
+    setNeedsOnline(e.tokenUniqueReference, e.requiresOnline);
+    // A card that becomes not-bound arrives as { requiresOnline: false, deviceNotBound: true }.
+    if (e.deviceNotBound) markCardNeedsReAdd(e.tokenUniqueReference);
+  }),
   merchant.onMerchantStatusChanged((e) => {
     // Same rule as canPay: branch on canAcceptPayments, never on status.
     if (!e.canAcceptPayments) disableGetPaid();
@@ -882,7 +896,10 @@ fires when a payment consumes a key and when a refresh delivers new ones — the
 actually executing. Payment keys *also* expire by clock, which happens with no SDK code running, so
 **nothing fires for that**; such a card simply reads as `requiresOnline` on your next
 `wallet.getCards()`. Do not present it as live coverage of every case. (`requiresOnline` here is
-the same value `getCards()` reports — the SDK reads one function for both.)
+the same value `getCards()` reports — the SDK reads one function for both.) The event also carries
+`deviceNotBound: boolean`, the same value as `Card.deviceNotBound`: a card the backend refused to
+issue keys to on this device arrives as `{ requiresOnline: false, deviceNotBound: true }` — prompt
+a remove-and-re-add, not a reconnect.
 
 **Where `wallet.onTokenStatusChanged`'s answers come from:** the SDK polls each stored card's
 server status itself on both platforms — Android from a background job (roughly every 15 minutes,
@@ -920,6 +937,7 @@ Every rejection is a `VeyraError` with a stable `code` — never string-match me
 | `ONLINE_REQUIRED` | card needs the device online; grey it out, SDK self-heals |
 | `TOKEN_NOT_ACTIVE` | card blocked server-side (e.g. suspended) — not an activation prompt; `status` on the card says why (§6.3) |
 | `AMOUNT_EXCEEDS_CARD_LIMIT` | the amount is larger than this card can carry in one payment. **Going online does not help** — offer a smaller amount or another card |
+| `DEVICE_NOT_BOUND` | the card was added on another device (or before the app was reinstalled), so it cannot get payment keys here — `Card.deviceNotBound` is set. **Going online and a smaller amount do not help** — ask the customer to remove the card and add it again on this phone |
 | `AUTH_CANCELLED` / `AUTH_FAILED` | the customer dismissed / failed the device authentication the SDK raised — nothing was sent |
 | `AUTH_UNAVAILABLE` | no enrolled biometric **and** no screen lock on this device; send them to system settings — a retry cannot help |
 | `NO_ACTIVE_CARD` / `CARD_CANNOT_SHOW_QR` | select a payable card / re-add a pre-QR card |
@@ -1116,16 +1134,16 @@ reads have their own vocabularies (or reject). This is the complete itemisation.
 
 | Call / event | Carries the outcome in | Statuses it can return | Codes it can return |
 |---|---|---|---|
-| `wallet.payScannedContext(handle)` (**scan-to-pay, merchant QR**) | `PaymentOutcome.responseStatus`, `.responseCode`, `.responseStatusReason`, `.approved`, `.message` | `'APPROVED'` / `'DECLINED'` / `'FAILED'` / `'PENDING'` / `null` (treat as unresolved) | The full vocabulary; `12` when the merchant's QR lapsed before the push landed, `13` on an amount/currency mismatch. Card-side refusals never reach here — they **reject** with `ONLINE_REQUIRED` / `AMOUNT_EXCEEDS_CARD_LIMIT` / `TOKEN_NOT_ACTIVE` / `AUTH_*` before anything is sent |
+| `wallet.payScannedContext(handle)` (**scan-to-pay, merchant QR**) | `PaymentOutcome.responseStatus`, `.responseCode`, `.responseStatusReason`, `.approved`, `.message` | `'APPROVED'` / `'DECLINED'` / `'FAILED'` / `'PENDING'` / `null` (treat as unresolved) | The full vocabulary; `12` when the merchant's QR lapsed before the push landed, `13` on an amount/currency mismatch. Card-side refusals never reach here — they **reject** with `ONLINE_REQUIRED` / `AMOUNT_EXCEEDS_CARD_LIMIT` / `TOKEN_NOT_ACTIVE` / `DEVICE_NOT_BOUND` / `AUTH_*` before anything is sent |
 | `wallet.showQrToPay(amountMinorUnits)` (**show-to-pay, customer QR**) | `PaymentQr` — the payload to display | — | — The merchant submits the payment, so the outcome arrives later on the history row via reconciliation. Pre-payment refusals are rejections, not codes |
 | `wallet.onTapEvent(listener)` (**wallet tap, Android only**) | the `transactionCompleted` event's top-level `status` | `'APPROVED'` / `'DECLINED'` / `'ERROR'` | — The **offline leg** (what the card told the terminal), not the issuer's authorisation; that lands on the history row with the full triple |
-| `wallet.onPaymentRefusal(tur, listener)` | `requireOnline` / `amountExceedCardLimit` | — | — Refused **before anything was sent**, so there is no response code by design. Not an outcome: nothing was attempted |
+| `wallet.onPaymentRefusal(tur, listener)` | `requireOnline` / `amountExceedCardLimit` / `deviceNotBound` | — | — Refused **before anything was sent**, so there is no response code by design. Not an outcome: nothing was attempted |
 | `wallet.inspectScannedQr(payload)` | `ScanInspection` | `Verified` / `Rejected` | **A different vocabulary:** `MALFORMED`, `MISSING_SIGNATURE`, `UNKNOWN_KEY`, `BAD_SIGNATURE`, `EXPIRED`. Every rejection ends the flow — no payment was attempted |
 | `wallet.getTransactions(...)` / `refreshTransactionStatus(hash)` / `reconcilePendingTransactions()` | `TransactionSummary.authorizationStatus`, `.responseCode`, `.responseStatusReason` | `'PENDING'` (still polling) / `'APPROVED'` / `'DECLINED'` / `'FAILED'` / `null` (legacy row) | The full vocabulary; poll answers `09`, `09` + escalated, `25`, or the settled outcome |
 | `wallet.onTransactionResolved(listener)` | `e.status`, `e.responseCode` | `'APPROVED'` / `'DECLINED'` / `'FAILED'` | The settled outcome's code (keyed on `transactionHash`) |
 | `wallet.digitise(...)` / `verifyAccount(...)` | `.responseCode`, `.responseStatus`, `.responseStatusReason` on `DigitiseResult` / `VerifyAccountResponse` | `responseStatus`: `'APPROVED'` / `'DECLINED'` / `'FAILED'` / `'PENDING'` | **A different vocabulary:** `'APPROVED'`, `'APPROVE_REQUIRE_AUTH'`, `'DECLINED'` — anything else means the token is **discarded** (nothing provisioned, no card added). The issuer's cause arrives in `responseStatusReason` (branch on it; `message` is the same cause worded for display) — see [9.5 Add a card (tokenisation)](#95-add-a-card-tokenisation--every-code-status-and-cause) |
 | `wallet.requestActivationCode(...)` / `activate(...)` | `.status`, `.failureCode`, `.attemptsRemaining`, `.recommendDelete` | `'SUCCESS'` / `'FAILURE'` | **A different vocabulary:** the typed `failureCode` (`CODE_EXPIRED`, `CODE_INVALID`, `MAX_ATTEMPTS_EXCEEDED`, `CODE_REQUEST_RATE_LIMITED`, `NO_PENDING_ACTIVATION`, `ACTIVATION_LOCKED`, `TOKEN_NOT_FOUND`, `TOKEN_NOT_ACTIVATABLE`, `INVALID_REQUEST`, `ACTIVATION_FAILED`, or any value added after your build — the type keeps unknown codes flowing through verbatim) |
-| `wallet.getCards()` / `tokenStatus(...)` / `checkTokenActive(...)` / `deactivateToken(...)` / `onTokenStatusChanged` | `Card.status` / `.isActive` / `.requiresOnline`; the event's `canPay` | `'ACTIVE'` / `'PENDING_ACTIVATION'` / `'SUSPENDED'` / `'EXPIRED'` / `'DEACTIVATED'` / `'UNKNOWN'` | — Card lifecycle, not a payment outcome. **Branch on `canPay`**, not on the status name |
+| `wallet.getCards()` / `tokenStatus(...)` / `checkTokenActive(...)` / `deactivateToken(...)` / `onTokenStatusChanged` | `Card.status` / `.isActive` / `.requiresOnline` / `.deviceNotBound`; the event's `canPay` | `'ACTIVE'` / `'PENDING_ACTIVATION'` / `'SUSPENDED'` / `'EXPIRED'` / `'DEACTIVATED'` / `'UNKNOWN'` | — Card lifecycle, not a payment outcome. **Branch on `canPay`**, not on the status name |
 
 **Reading the table:** a dash in the code column means that call has no response code *by design* —
 minting one would assert that a payment was attempted and something on the wire answered. Where a
@@ -1247,6 +1265,7 @@ The values you can see on the tokenisation surfaces:
 | `UNKNOWN_TOKEN_REQUESTOR` / `TOKEN_REQUESTOR_MISMATCH` | The token requestor is unknown, or does not own this token |
 | `LOCAL_TRANSACTION_DATE_AND_HASH_REQUIRED` / `LOCAL_TRANSACTION_DATE_INVALID` | A transaction-status read was called without a usable date + hash pair |
 | `DUPLICATE_STATE` | The same state was written twice |
+| `DEVICE_NOT_BOUND` | Payment keys were requested for a card from a device other than the one it was added on (or after the app was reinstalled). The SDK surfaces it as `Card.deviceNotBound` / the `DEVICE_NOT_BOUND` error code and stops requesting keys for that card; the only remedy is to remove the card and add it again on this phone |
 | `INTERNAL_ERROR` | Anything unclassified on the server |
 
 Both fields are on the result: `DigitiseResult.responseStatus` / `.responseStatusReason` from

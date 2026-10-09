@@ -6,12 +6,12 @@
 import type { VeyraSoftposConfig, VeyraWalletConfig } from 'veyra-sdk-react-native';
 import type { ConnectionSettings } from './src/connection';
 
-// Everything except the customer and the connection: the app adds `customerId` (whoever it has
-// signed in) and each SDK's `connection` (built from VEYRA_CONNECTION below) when it calls
-// Veyra.initialize — see src/session.tsx and src/connection.ts.
+// Everything except the customer and the provider: the app adds `customerId` (whoever it has
+// signed in) and the one `provider` for both SDKs (built from VEYRA_CONNECTION below) when it
+// calls Veyra.initialize — see src/session.tsx and src/connection.ts.
 export const VEYRA_CONFIG: {
-  softpos: Omit<VeyraSoftposConfig, 'connection'>;
-  wallet: Omit<VeyraWalletConfig, 'connection'>;
+  softpos: VeyraSoftposConfig;
+  wallet: VeyraWalletConfig;
 } = {
   softpos: {
     environment: 'TEST',
@@ -30,14 +30,14 @@ export const VEYRA_CONFIG: {
 };
 
 /**
- * How both SDKs connect to Veyra. `mode` is REQUIRED, with no default — the app refuses to start
- * until it is set. One of:
- *  - 'directWithAssertion'    the SDK calls Veyra with an assertion your bank backend signs
- *                             (needs clientId + bankBackendBaseUrl; your backend serves
- *                             POST /sdk-assertion)
- *  - 'viaAppBackend'          the SDK calls nothing itself; every call goes through your bank
- *                             backend (needs bankBackendBaseUrl; your backend serves
- *                             POST /veyra-relay/{method})
+ * Which provider the app builds for both SDKs. `mode` is REQUIRED, with no default — the app
+ * refuses to start until it is set. One of:
+ *  - 'directWithAssertion'    a VeyraAuthProvider: the SDK calls Veyra with an assertion your bank
+ *                             backend signs (needs clientId + bankBackendBaseUrl; your backend
+ *                             serves POST /sdk-assertion)
+ *  - 'viaAppBackend'          a VeyraProxyProvider: the SDK calls nothing itself; every call goes
+ *                             through your bank backend (needs bankBackendBaseUrl; your backend
+ *                             serves POST /veyra-relay/{method})
  *  - 'directWithClientSecret' DEPRECATED — the SDK calls Veyra with a client secret held in the
  *                             app (needs clientId + clientSecret); retired per provider
  */

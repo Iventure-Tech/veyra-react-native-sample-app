@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import Veyra from 'veyra-sdk-react-native';
 import { VEYRA_CONFIG, VEYRA_CONNECTION } from '../veyra.config';
-import { appConnection } from './connection';
+import { appProvider } from './connection';
 
 /**
  * The app's own login session. Who is logged in is the banking app's to remember, never the
@@ -40,13 +40,13 @@ interface SessionApi {
 const SessionContext = createContext<SessionApi | null>(null);
 
 async function initializeFor(customerId: string): Promise<void> {
-  // How the SDKs reach Veyra, from veyra.config.ts. An unset mode throws here, naming the
-  // setting, and the launch shows it — there is no default mode.
-  const connection = appConnection(VEYRA_CONNECTION);
+  // How both SDKs reach Veyra — one provider, from veyra.config.ts. An unset mode throws here,
+  // naming the setting, and the launch shows it — there is no default.
   return Veyra.initialize({
     customerId,
-    softpos: { ...VEYRA_CONFIG.softpos, connection },
-    wallet: { ...VEYRA_CONFIG.wallet, connection },
+    provider: appProvider(VEYRA_CONNECTION),
+    softpos: VEYRA_CONFIG.softpos,
+    wallet: VEYRA_CONFIG.wallet,
   });
 }
 

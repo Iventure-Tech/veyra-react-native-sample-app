@@ -33,7 +33,7 @@ catalogue — lives in this repository.
   NFC-capable device per platform — NFC and device attestation don't work on emulators.
 - **Veyra onboarding credentials**: artifact-repository username/password, payment app
   provider id, token requestor id, whatever your
-  [connection mode](#choose-a-connection-mode) needs — plus your Apple Developer Team ID
+  [provider](#choose-a-provider) needs — plus your Apple Developer Team ID
   for iOS. The app talks to the Veyra TEST environment.
 - The test account details from your onboarding pack.
 
@@ -52,8 +52,11 @@ catalogue — lives in this repository.
    # edit veyra.config.ts
    ```
 
-   Set `VEYRA_CONNECTION.mode` — there is no default, and the app shows a setup error at
-   launch until it is set (see [Choose a connection mode](#choose-a-connection-mode)).
+   `VEYRA_CONNECTION.mode` comes set to `'directWithClientSecret'` — the deprecated
+   `VeyraClientSecretProvider`, **for testing only** — so the sample runs with just your
+   `clientId` and `clientSecret`. Switch it to `'directWithAssertion'` or `'viaAppBackend'` to try
+   the providers a real app ships (see [Choose a provider](#choose-a-provider)). It is required:
+   with it blank the app shows a setup error at launch.
 
 3. **Android** — add your artifact-repository credentials to
    `~/.gradle/gradle.properties`:
@@ -86,27 +89,27 @@ catalogue — lives in this repository.
    In Xcode, set your team on the VeyraBank target and enable the **Near Field
    Communication Tag Reading** capability (tap acceptance).
 
-## Choose a connection mode
+## Choose a provider
 
-Both SDKs need a `connection` — how they reach Veyra. The sample uses one mode for both, read
+Both SDKs share one **provider** — how they reach Veyra. The sample builds it from the mode read
 from `VEYRA_CONNECTION` in `veyra.config.ts`:
 
 | `mode` | What it needs | Your bank backend serves |
-|---|---|---|
-| `directWithAssertion` (recommended) | `clientId`, `bankBackendBaseUrl` | `POST /sdk-assertion` `{"jkt": …, "audience": …}` → `{"assertion": "<JWT>"}` (401 when nobody is signed in) |
-| `viaAppBackend` | `bankBackendBaseUrl` | `POST /veyra-relay/{post\|get\|put\|delete\|patch}` — forwards the SDK's envelope to Veyra unmodified and answers with Veyra's body |
-| `directWithClientSecret` (**deprecated**) | `clientId`, `clientSecret` | nothing — the secret sits in the app, which is why this mode is being retired |
+|---|---|---|---|
+| `directWithAssertion` (recommended) | `VeyraAuthProvider` | `clientId`, `bankBackendBaseUrl` | `POST /sdk-assertion` `{"audience": …, "jkt": …}` → `{"assertion": "<JWT>"}` (401 when nobody is signed in) |
+| `viaAppBackend` | `VeyraProxyProvider` | `bankBackendBaseUrl` | `POST /veyra-relay/{post\|get\|put\|delete\|patch}` — forwards the SDK's envelope to Veyra unmodified and answers with Veyra's body |
+| `directWithClientSecret` (**deprecated**) | `VeyraClientSecretProvider` | `clientId`, `clientSecret` | nothing — the secret sits in the app, which is why this mode is being retired |
 
 `bankSessionToken` is a **placeholder** for your app's own login session, sent to your bank
-backend as a bearer token. The two callbacks that call your backend are in `src/connection.ts` —
-short, and meant to be copied. The relay is called from the SDK's background work too, not only
-from screens. The full contract — the assertion's claims, the relay envelope, and how a relay
-reports a failure — is in [§4.3 of the Developer Guide](DEVELOPER-GUIDE.md#43-connect-to-veyra--choosing-a-connection-mode).
+backend as a bearer token. The two providers that call your backend are in `src/connection.ts` —
+short, and meant to be copied. The proxy provider is called from the SDK's background work too, not only
+from screens. The full contract — the assertion's claims, the request envelope, and how a proxy
+provider reports a failure — is in [§4.2 of the Developer Guide](DEVELOPER-GUIDE.md#42-connect-to-veyra--choosing-a-provider).
 
-> **Upgrading from SDK 2.x?** Both config blocks now take a required `connection` instead of
-> `clientId` / `clientSecret`; staying on client credentials is a one-line change per block —
-> `connection: { mode: 'directWithClientSecret', clientId, clientSecret }`. See
-> [§4.4 of the Developer Guide](DEVELOPER-GUIDE.md#44-migrating-from-2x-to-300). A
+> **Upgrading from SDK 2.x?** The config blocks no longer take `clientId` / `clientSecret`;
+> `Veyra.initialize` takes one `provider` instead: a `VeyraAuthProvider` (recommended) or a
+> `VeyraProxyProvider`. See
+> [§4.3 of the Developer Guide](DEVELOPER-GUIDE.md#43-migrating-from-2x-to-300). A
 > `veyra.config.ts` from 2.x no longer compiles: copy the new `VEYRA_CONFIG` shape and the
 > `VEYRA_CONNECTION` block from `veyra.config.example.ts`.
 
@@ -116,7 +119,7 @@ reports a failure — is in [§4.3 of the Developer Guide](DEVELOPER-GUIDE.md#43
 |---|---|
 | `App.tsx` | Navigation; wraps the app in the session provider |
 | `src/session.tsx` | The app's own login session — initialises the SDK with the signed-in customer on every launch; switch and sign out |
-| `src/connection.ts` | The connection to Veyra: mode selection, the assertion provider and the relay that call your bank backend |
+| `src/connection.ts` | How the SDKs reach Veyra: mode selection, and the two providers (`VeyraAuthProvider`, `VeyraProxyProvider`) that call your bank backend |
 | `src/screens/HomeScreen.tsx` | Customer bar (signed in as / Switch / Sign out / Sign in); payment entry points disabled while signed out |
 | `src/screens/GetPaidScreen.tsx` | The merchant flow — `useGetPaidSession` + all three acceptance rails |
 | `src/screens/PayScreen.tsx` | The wallet flow — `usePaySession`, card states, tap arming |

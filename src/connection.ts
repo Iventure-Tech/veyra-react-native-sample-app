@@ -1,6 +1,7 @@
 import {
   VeyraRelayError,
   type VeyraAuthProvider,
+  type VeyraClientSecretProvider,
   type VeyraProvider,
   type VeyraProxyProvider,
 } from 'veyra-sdk-react-native';
@@ -41,12 +42,7 @@ export function appProvider(settings: ConnectionSettings, http: Fetch = fetch): 
   const session = () => setting(settings.bankSessionToken) || null;
   switch (mode) {
     case 'directWithClientSecret':
-      // Deprecated: a secret inside an app can be extracted. Retired per provider.
-      return {
-        providerType: 'AUTHENTICATION',
-        clientId: setting(settings.clientId),
-        clientSecret: setting(settings.clientSecret),
-      };
+      return clientSecretCredentials(setting(settings.clientId), setting(settings.clientSecret));
     case 'directWithAssertion':
       return bankBackendAssertionProvider(setting(settings.clientId), bankBackend(settings), session, http);
     case 'viaAppBackend':
@@ -57,6 +53,15 @@ export function appProvider(settings: ConnectionSettings, http: Fetch = fetch): 
           "veyra.config.ts and choose 'directWithAssertion', 'viaAppBackend' or 'directWithClientSecret'."
       );
   }
+}
+
+/**
+ * The deprecated client-secret provider — **for testing only**, e.g. against UAT before your bank
+ * backend can sign assertions. A secret inside an app can be extracted: ship
+ * {@link bankBackendAssertionProvider} or {@link bankBackendRelay} instead.
+ */
+export function clientSecretCredentials(clientId: string, clientSecret: string): VeyraClientSecretProvider {
+  return { providerType: 'AUTHENTICATION', clientId, clientSecret };
 }
 
 function bankBackend(settings: ConnectionSettings): string {

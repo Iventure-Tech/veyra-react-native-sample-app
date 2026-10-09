@@ -74,6 +74,21 @@ describe('appProvider', () => {
     );
   });
 
+  it('the client-secret mode reads only the client id and secret, never the bank backend', () => {
+    const c = appProvider(
+      settings({ mode: 'directWithClientSecret', bankBackendBaseUrl: '', bankSessionToken: '' })
+    ) as { clientId: string; clientSecret: string };
+    expect(c.clientId).toBe('id');
+    expect(c.clientSecret).toBe('secret');
+    expect(Object.keys(c).sort()).toEqual(['clientId', 'clientSecret', 'providerType']);
+  });
+
+  it('the proxy mode needs no client id or secret', () => {
+    const p = appProvider(settings({ mode: 'viaAppBackend', clientId: '', clientSecret: '' }));
+    expect(p.providerType).toBe('REQUEST_PROCESSOR');
+    expect('clientId' in p).toBe(false);
+  });
+
   it('treats untouched template values as unset', () => {
     const c = appProvider(settings({ mode: 'directWithClientSecret', clientId: 'your-client-id' }));
     expect((c as { clientId: string }).clientId).toBe('');

@@ -35,7 +35,7 @@ export const VEYRA_CONFIG: {
  * VeyraClientSecretProvider) so the sample runs against Veyra with just the client id and secret
  * from your onboarding pack — FOR TESTING ONLY. A real app uses 'directWithAssertion' or
  * 'viaAppBackend'. One of:
- *  - 'directWithAssertion'    a VeyraAuthProvider: the SDK calls Veyra with an assertion your bank
+ *  - 'directWithAssertion'    a VeyraAssertionProvider: the SDK calls Veyra with an assertion your bank
  *                             backend signs (needs clientId + bankBackendBaseUrl; your backend
  *                             serves POST /sdk-assertion)
  *  - 'viaAppBackend'          a VeyraProxyProvider: the SDK calls nothing itself; every call goes

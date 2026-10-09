@@ -1,6 +1,6 @@
 import {
   VeyraRelayError,
-  type VeyraAuthProvider,
+  type VeyraAssertionProvider,
   type VeyraClientSecretProvider,
   type VeyraProvider,
   type VeyraProxyProvider,
@@ -36,23 +36,45 @@ const setting = (v: string | undefined): string => {
   return t.startsWith('your-') ? '' : t;
 };
 
-/** The provider for both SDKs. Throws, naming the setting, when the config is unusable. */
+/**
+ * The provider for both SDKs. Each mode reads only its own settings: the client-secret provider
+ * never sees the bank backend, and the backend providers never see a secret. Throws, naming the
+ * setting, when the config is unusable.
+ */
 export function appProvider(settings: ConnectionSettings, http: Fetch = fetch): VeyraProvider {
   const mode = setting(settings.mode);
-  const session = () => setting(settings.bankSessionToken) || null;
   switch (mode) {
-    case 'directWithClientSecret':
-      return clientSecretCredentials(setting(settings.clientId), setting(settings.clientSecret));
     case 'directWithAssertion':
-      return bankBackendAssertionProvider(setting(settings.clientId), bankBackend(settings), session, http);
+      return assertionProvider(settings, http);
     case 'viaAppBackend':
-      return bankBackendRelay(bankBackend(settings), session, http);
+      return proxyProvider(settings, http);
+    case 'directWithClientSecret':
+      return clientSecretProvider(settings);
     default:
       throw new Error(
         `VEYRA_CONNECTION.mode is not set (got "${mode}"). Copy veyra.config.example.ts to ` +
           "veyra.config.ts and choose 'directWithAssertion', 'viaAppBackend' or 'directWithClientSecret'."
       );
   }
+}
+
+/** `directWithAssertion`: your client id, and the bank backend that signs the assertion. */
+function assertionProvider(settings: ConnectionSettings, http: Fetch): VeyraAssertionProvider {
+  return bankBackendAssertionProvider(setting(settings.clientId), bankBackend(settings), bankSession(settings), http);
+}
+
+/** `viaAppBackend`: only the bank backend that relays the SDK's calls — no client id, no secret. */
+function proxyProvider(settings: ConnectionSettings, http: Fetch): VeyraProxyProvider {
+  return bankBackendRelay(bankBackend(settings), bankSession(settings), http);
+}
+
+/** `directWithClientSecret` (deprecated, testing only): just the client id and secret. */
+function clientSecretProvider(settings: ConnectionSettings): VeyraClientSecretProvider {
+  return clientSecretCredentials(setting(settings.clientId), setting(settings.clientSecret));
+}
+
+function bankSession(settings: ConnectionSettings): () => string | null {
+  return () => setting(settings.bankSessionToken) || null;
 }
 
 /**
@@ -84,7 +106,7 @@ export function bankBackendAssertionProvider(
   baseUrl: string,
   session: () => string | null,
   http: Fetch = fetch
-): VeyraAuthProvider {
+): VeyraAssertionProvider {
   return {
     providerType: 'AUTHENTICATION',
     clientId, // the OAuth client id Veyra issued to this app (public, not a secret)

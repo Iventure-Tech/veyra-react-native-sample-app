@@ -96,7 +96,7 @@ from `VEYRA_CONNECTION` in `veyra.config.ts`:
 
 | `mode` | What it needs | Your bank backend serves |
 |---|---|---|---|
-| `directWithAssertion` (recommended) | `VeyraAuthProvider` | `clientId`, `bankBackendBaseUrl` | `POST /sdk-assertion` `{"audience": …, "jkt": …}` → `{"assertion": "<JWT>"}` (401 when nobody is signed in) |
+| `directWithAssertion` (recommended) | `VeyraAssertionProvider` | `clientId`, `bankBackendBaseUrl` | `POST /sdk-assertion` `{"audience": …, "jkt": …}` → `{"assertion": "<JWT>"}` (401 when nobody is signed in) |
 | `viaAppBackend` | `VeyraProxyProvider` | `bankBackendBaseUrl` | `POST /veyra-relay/{post\|get\|put\|delete\|patch}` — forwards the SDK's envelope to Veyra unmodified and answers with Veyra's body |
 | `directWithClientSecret` (**deprecated**) | `VeyraClientSecretProvider` | `clientId`, `clientSecret` | nothing — the secret sits in the app, which is why this mode is being retired |
 
@@ -107,7 +107,7 @@ from screens. The full contract — the assertion's claims, the request envelope
 provider reports a failure — is in [§4.2 of the Developer Guide](DEVELOPER-GUIDE.md#42-connect-to-veyra--choosing-a-provider).
 
 > **Upgrading from SDK 2.x?** The config blocks no longer take `clientId` / `clientSecret`;
-> `Veyra.initialize` takes one `provider` instead: a `VeyraAuthProvider` (recommended) or a
+> `Veyra.initialize` takes one `provider` instead: a `VeyraAssertionProvider` (recommended) or a
 > `VeyraProxyProvider`. See
 > [§4.3 of the Developer Guide](DEVELOPER-GUIDE.md#43-migrating-from-2x-to-300). A
 > `veyra.config.ts` from 2.x no longer compiles: copy the new `VEYRA_CONFIG` shape and the
@@ -119,7 +119,7 @@ provider reports a failure — is in [§4.2 of the Developer Guide](DEVELOPER-GU
 |---|---|
 | `App.tsx` | Navigation; wraps the app in the session provider |
 | `src/session.tsx` | The app's own login session — initialises the SDK with the signed-in customer on every launch; switch and sign out |
-| `src/connection.ts` | How the SDKs reach Veyra: mode selection, and the two providers (`VeyraAuthProvider`, `VeyraProxyProvider`) that call your bank backend |
+| `src/connection.ts` | How the SDKs reach Veyra: mode selection, and the two providers (`VeyraAssertionProvider`, `VeyraProxyProvider`) that call your bank backend |
 | `src/screens/HomeScreen.tsx` | Customer bar (signed in as / Switch / Sign out / Sign in); payment entry points disabled while signed out |
 | `src/screens/GetPaidScreen.tsx` | The merchant flow — `useGetPaidSession` + all three acceptance rails |
 | `src/screens/PayScreen.tsx` | The wallet flow — `usePaySession`, card states, tap arming |

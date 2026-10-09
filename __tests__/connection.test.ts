@@ -78,16 +78,16 @@ describe('bankBackendAssertionProvider', () => {
   it('posts the thumbprint and audience with the bank session and returns the assertion', async () => {
     const { http, calls } = fakeFetch([{ status: 200, body: '{"assertion":"eyJ.a.b"}' }]);
     const provider = bankBackendAssertionProvider('https://bank.example', () => 'bank-session', http);
-    await expect(provider('JKT-1', 'https://api.uat.veyra.co')).resolves.toBe('eyJ.a.b');
+    await expect(provider('https://api.uat.veyra.co', 'JKT-1')).resolves.toBe('eyJ.a.b');
     expect(calls[0].url).toBe('https://bank.example/sdk-assertion');
     expect(calls[0].init.method).toBe('POST');
-    expect(JSON.parse(calls[0].init.body as string)).toEqual({ jkt: 'JKT-1', audience: 'https://api.uat.veyra.co' });
+    expect(JSON.parse(calls[0].init.body as string)).toEqual({ audience: 'https://api.uat.veyra.co', jkt: 'JKT-1' });
     expect((calls[0].init.headers as Record<string, string>).Authorization).toBe('Bearer bank-session');
   });
 
   it('no session means no assertion and no call', async () => {
     const { http, calls } = fakeFetch([]);
-    await expect(bankBackendAssertionProvider('https://bank.example', () => null, http)('JKT', 'https://api.uat.veyra.co')).resolves.toBeNull();
+    await expect(bankBackendAssertionProvider('https://bank.example', () => null, http)('https://api.uat.veyra.co', 'JKT')).resolves.toBeNull();
     expect(calls).toHaveLength(0);
   });
 

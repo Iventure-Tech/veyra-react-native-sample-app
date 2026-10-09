@@ -100,13 +100,13 @@ npm install
 cp veyra.config.example.ts veyra.config.ts
 # edit veyra.config.ts — your payment app provider id, token requestor id (and your
 # Apple Team ID for iOS), and VEYRA_CONNECTION: the connection mode (required, no
-# default — §4.3) plus what that mode needs
+# default — §4.2) plus what that mode needs
 ```
 
 `veyra.config.ts` is gitignored — real credentials never get committed. It holds
 everything **except** the customer and the connection callbacks: the app adds `customerId`
 when it initialises (§4.1), and builds each SDK's `connection` from `VEYRA_CONNECTION`
-(§4.3). If you have a `veyra.config.ts` from an earlier checkout, copy the current shape
+(§4.2). If you have a `veyra.config.ts` from an earlier checkout, copy the current shape
 from `veyra.config.example.ts` — a 2.x one still carries `clientId` / `clientSecret` in the
 SDK blocks and no longer compiles.
 
@@ -193,12 +193,8 @@ demo-customer-1*.
 ## 4. Initialise
 
 > **Breaking change (3.0.0):** `clientId` / `clientSecret` are gone from both blocks; each
-> takes a required `connection` instead. See §4.3 for the connection modes and §4.4 for the
+> takes a required `connection` instead. See §4.2 for the connection modes and §4.3 for the
 > migration.
-
-> **Breaking change (2.0.0):** `customerId` is required on every `Veyra.initialize`, and
-> `merchant.clearStored()` is gone. See §4.1 for the customer model and §4.2 for the
-> migration checklist.
 
 > **Breaking change:** `softpos` now requires a `paymentAppProviderId` — the globally unique
 > identifier issued to your organisation at onboarding, the same value the `wallet` block
@@ -211,7 +207,7 @@ import Veyra from 'veyra-sdk-react-native';
 
 await Veyra.initialize({
   customerId,                              // the customer your app has signed in
-  softpos: { environment: 'TEST', paymentAppProviderId, connection },  // connection: §4.3
+  softpos: { environment: 'TEST', paymentAppProviderId, connection },  // connection: §4.2
   wallet: {
     environment: 'TEST',
     connection,                            // required; may differ from the softpos one
@@ -269,24 +265,7 @@ await Veyra.initialize({ customerId: otherCustomerId, softpos, wallet });
   (killed, or the phone restarted and the app not yet opened), a terminal tap is answered
   "application not found" until your app initialises with the customer.
 
-### 4.2 Migrating from 1.x to 2.0.0
-
-1. **Pass `customerId` to every `Veyra.initialize`** — the signed-in customer, on every
-   launch. Do not initialise while nobody is signed in.
-2. **Call `Veyra.signOut()` when the customer logs out** of your app.
-3. **Handle `NOT_SIGNED_IN`** (§9) — raised by any call made while signed out.
-4. **Remove `merchant.clearStored()`** — it no longer exists. A successful
-   `merchant.register` overwrites the stored merchant, so there is nothing to clear first.
-5. **Pass `merchantOrderId` on every merchant payment** — it is now required on
-   `tap.start({ …, merchantOrderId })`, `createPaymentContext(amount, currency | undefined,
-   merchantOrderId)` and `chargeCustomerQr(handle, merchantOrderId)`. A blank one rejects with
-   the new `INVALID_REQUEST` code before anything is sent.
-6. **Expect customers to start over once.** Data stored by 1.x is erased on the first
-   launch of 2.0.0: customers add their cards again, and merchants register again.
-7. **Retype your config** if you keep it apart from the customer, e.g.
-   `Omit<VeyraConfig, 'customerId'>`.
-
-### 4.3 Connect to Veyra — choosing a connection mode
+### 4.2 Connect to Veyra — choosing a connection mode
 
 Each SDK takes a **required** `connection`. There is no default and the SDK never guesses one from
 which fields you set: which mode you use is your payment app provider's decision. The softpos and
@@ -316,7 +295,7 @@ import Veyra, { type VeyraConnection } from 'veyra-sdk-react-native';
 const connection: VeyraConnection = {
   mode: 'directWithAssertion',
   clientId: 'your-client-id',
-  assertionProvider: (jkt, audience) => myBankApi.sdkAssertion(jkt, audience),   // Promise<JWT | null>
+  assertionProvider: (audience, jkt) => myBankApi.sdkAssertion(audience, jkt),   // Promise<JWT | null>
 };
 
 // viaAppBackend
@@ -324,13 +303,6 @@ const connection: VeyraConnection = {
   mode: 'viaAppBackend',
   post: forward('post'), get: forward('get'), put: forward('put'),
   delete: forward('delete'), patch: forward('patch'),
-};
-
-// directWithClientSecret (deprecated)
-const connection: VeyraConnection = {
-  mode: 'directWithClientSecret',
-  clientId: 'your-client-id',
-  clientSecret: 'your-client-secret',
 };
 
 // Then, whichever mode:
@@ -354,7 +326,7 @@ replace it with your login session); neither is a Veyra credential.
 
 ```
 POST {your backend}/sdk-assertion                          (directWithAssertion)
-     {"jkt": "<jkt>", "audience": "<audience>"}
+     {"audience": "<audience>", "jkt": "<jkt>"}
   →  200 {"assertion": "<compact JWT>"}     401 when no user is signed in (resolve null)
 
 POST {your backend}/veyra-relay/{post|get|put|delete|patch} (viaAppBackend)
@@ -465,30 +437,39 @@ fields and could alter plain answers such as a transaction status — which is w
 bank or payment app provider itself, the party already trusted with those fields, may operate a
 relay, and why it must forward bytes unmodified.
 
-**`directWithClientSecret` is deprecated.** A secret shipped inside an app can be extracted from
-it, so this mode is retired provider by provider once each moves to `directWithAssertion` or
-`viaAppBackend`. Until your provider's cut-over date it keeps working exactly as before. Never
-commit the secret to source control (this sample keeps it in the gitignored `veyra.config.ts`).
+**`directWithClientSecret` is deprecated.** It exists only so apps already on client credentials
+keep working until their provider's cut-over date; it is retired provider by provider. Don't build a
+new integration on it: a secret shipped inside an app can be extracted. Use `directWithAssertion` or
+`viaAppBackend`.
 
-### 4.4 Migrating from 2.x to 3.0.0
+### 4.3 Migrating from 2.x to 3.0.0
 
 1. **Replace `clientId` / `clientSecret` with a `connection`** on both the `softpos` and the
-   `wallet` block (§4.3). Staying on client credentials is a one-line change per block:
+   `wallet` block (§4.2). Either your backend signs an assertion for the signed-in user, or every
+   call goes through your backend:
 
    ```ts
    // 2.x
    softpos: { environment: 'TEST', clientId: ID, clientSecret: SECRET, paymentAppProviderId: P }
-   // 3.0.0
-   softpos: { environment: 'TEST', connection: { mode: 'directWithClientSecret', clientId: ID, clientSecret: SECRET }, paymentAppProviderId: P }
+
+   // 3.0.0 — directWithAssertion (recommended)
+   const connection: VeyraConnection = {
+     mode: 'directWithAssertion',
+     clientId: ID,
+     assertionProvider: (audience, jkt) => myBankApi.sdkAssertion(audience, jkt),
+   };
+   // 3.0.0 — or viaAppBackend: { mode: 'viaAppBackend', post, get, put, delete, patch }
+
+   softpos: { environment: 'TEST', connection, paymentAppProviderId: P }
    ```
+
+   Each needs one endpoint on your backend (§4.2).
 
 2. **Handle `NOT_AUTHENTICATED`** (§9) — the SDK could not obtain credentials, so nothing was sent.
 3. **Update `veyra.config.ts`** if you run this sample: copy the new `VEYRA_CONFIG` shape (no
    credentials in it) and the `VEYRA_CONNECTION` block from `veyra.config.example.ts`, then set
    `mode`.
-4. `directWithClientSecret` is **deprecated** — plan the move to `directWithAssertion` or
-   `viaAppBackend` before your provider's cut-over date. On the wire it is unchanged, so apps on 2.x
-   keep working while you migrate.
+4. Apps still on 2.x keep working while you migrate.
 
 ## 5. Sessions — how payment screens work in React Native
 
@@ -788,7 +769,7 @@ CAC number for business; optional `walletAccountId`, stored verbatim by the gate
 `getSettlementBanks()`, `isRegistered()`, `getStored()`, `refreshStatus()`,
 `activate()` / `deactivate()`, `update(…)` (also accepts optional `walletAccountId` and
 `bvn`). The merchant belongs to the signed-in customer (§4.1); a successful `register`
-overwrites the stored merchant — there is no `clearStored()` in 2.0.0. Gate acceptance on the stored merchant's status
+overwrites the stored merchant — there is no `clearStored()`. Gate acceptance on the stored merchant's status
 being `ACTIVE`. There is no `acquirerId` field anywhere: the gateway resolves it from
 your `paymentAppProviderId` and the SDK stores it from the responses.
 
@@ -1220,7 +1201,7 @@ Every rejection is a `VeyraError` with a stable `code` — never string-match me
 | `SESSION_REQUIRED` | mount `usePaySession` / `useGetPaidSession` on the payment screen |
 | `MODE_REFUSED` | the other experience's payment is mid-flight; retry after it completes |
 | `INVALID_REQUEST` | refused **before anything was sent** because an argument is invalid — e.g. a blank `merchantOrderId` on `tap.start`, `createPaymentContext` or `chargeCustomerQr`. Fix the call; there is no payment to look up |
-| `NOT_AUTHENTICATED` | the SDK could not obtain credentials, so **nothing was sent**: your `assertionProvider` resolved `null` or rejected, or the token endpoint refused the client. Under `directWithAssertion` this usually means nobody is signed in to your app — send the user to sign-in, then retry. The SDK never falls back to another connection mode (§4.3) |
+| `NOT_AUTHENTICATED` | the SDK could not obtain credentials, so **nothing was sent**: your `assertionProvider` resolved `null` or rejected, or the token endpoint refused the client. Under `directWithAssertion` this usually means nobody is signed in to your app — send the user to sign-in, then retry. The SDK never falls back to another connection mode (§4.2) |
 | `NO_NETWORK_CONNECTION` | **the device** has no working internet connection — ask the user to connect and retry. Nothing was sent, so nothing needs undoing. Raised by every backend call in both experiences (wallet: get banks, verify account, digitise, request activation code, activate, token status; merchant: register, refresh/activate/deactivate/update merchant, create payment context, take a payment) |
 | `ONLINE_REQUIRED` | card needs the device online; grey it out, SDK self-heals |
 | `TOKEN_NOT_ACTIVE` | card blocked server-side (e.g. suspended) — not an activation prompt; `status` on the card says why (§6.3) |
@@ -1282,7 +1263,7 @@ flight), so check it **before** you read the status.
 | Native code | Reaches you as | Meaning / what to do |
 |---|---|---|
 | `NO_NETWORK_CONNECTION` | `VeyraError` code `NO_NETWORK_CONNECTION` | The device has no working internet connection; the call never left it. "Connect and try again" — nothing was charged and nothing is polling. |
-| `NOT_AUTHENTICATED` | `VeyraError` code `NOT_AUTHENTICATED` | The SDK could not obtain credentials, so the call never left the device — see §4.3. Under `directWithAssertion` usually nobody is signed in. |
+| `NOT_AUTHENTICATED` | `VeyraError` code `NOT_AUTHENTICATED` | The SDK could not obtain credentials, so the call never left the device — see §4.2. Under `directWithAssertion` usually nobody is signed in. |
 | `MISSING_MANDATORY_CONFIG` | `VeyraError` code `MISSING_MANDATORY_CONFIG` | A required configuration value is absent — environment, a usable connection, terminal or merchant id. An integration bug: fix `veyra.config.ts`, or register the merchant (which supplies terminal/merchant ids). |
 | `INVALID_REQUEST` | `VeyraError` code `INVALID_REQUEST`, or tap `result.sdkErrorCode` | The request failed validation — amount not greater than zero, a missing / non-4-digit ISO 4217 currency, or a blank (or over-255-character) `merchantOrderId`. Fix the input and call again; nothing was sent. (Parameter validation the bridge catches first arrives as `VALIDATION` with `field` instead.) |
 | `PAYMENT_CANCELLED` | tap `result.sdkErrorCode` | The merchant cancelled before a card was tapped. Not an error to report — return to the amount screen. |
@@ -1610,9 +1591,6 @@ the 30-day window is measured from the transaction date rather than from time sp
   pattern); the SDK re-attaches to the recreated native screen.
 - **Every call rejects with `NOT_SIGNED_IN`** — `Veyra.signOut()` was called, or your
   app never initialised this launch. Initialise with the signed-in customer (§4.1).
-- **Cards or merchant "disappeared" after upgrading to 2.0.0** — expected once: 1.x data
-  is erased on first launch, and 2.0.0 data is per customer. Check you pass the same
-  `customerId` as before; then add cards / register again (§4.2).
 - **Android: terminal says "application not found" while the app is closed** — the app
   process has not initialised since it was killed or the phone restarted. Open the app;
   once it initialises with the customer, taps are answered again.

@@ -93,7 +93,7 @@ from `VEYRA_CONNECTION` in `veyra.config.ts`:
 
 | `mode` | What it needs | Your bank backend serves |
 |---|---|---|
-| `directWithAssertion` (recommended) | `clientId`, `bankBackendBaseUrl` | `POST /sdk-assertion` `{"jkt": …, "audience": …}` → `{"assertion": "<JWT>"}` (401 when nobody is signed in) |
+| `directWithAssertion` (recommended) | `clientId`, `bankBackendBaseUrl` | `POST /sdk-assertion` `{"audience": …, "jkt": …}` → `{"assertion": "<JWT>"}` (401 when nobody is signed in) |
 | `viaAppBackend` | `bankBackendBaseUrl` | `POST /veyra-relay/{post\|get\|put\|delete\|patch}` — forwards the SDK's envelope to Veyra unmodified and answers with Veyra's body |
 | `directWithClientSecret` (**deprecated**) | `clientId`, `clientSecret` | nothing — the secret sits in the app, which is why this mode is being retired |
 
@@ -101,12 +101,11 @@ from `VEYRA_CONNECTION` in `veyra.config.ts`:
 backend as a bearer token. The two callbacks that call your backend are in `src/connection.ts` —
 short, and meant to be copied. The relay is called from the SDK's background work too, not only
 from screens. The full contract — the assertion's claims, the relay envelope, and how a relay
-reports a failure — is in [§4.3 of the Developer Guide](DEVELOPER-GUIDE.md#43-connect-to-veyra--choosing-a-connection-mode).
+reports a failure — is in [§4.2 of the Developer Guide](DEVELOPER-GUIDE.md#42-connect-to-veyra--choosing-a-connection-mode).
 
 > **Upgrading from SDK 2.x?** Both config blocks now take a required `connection` instead of
-> `clientId` / `clientSecret`; staying on client credentials is a one-line change per block —
-> `connection: { mode: 'directWithClientSecret', clientId, clientSecret }`. See
-> [§4.4 of the Developer Guide](DEVELOPER-GUIDE.md#44-migrating-from-2x-to-300). A
+> `clientId` / `clientSecret`: use `directWithAssertion` (recommended) or `viaAppBackend`. See
+> [§4.3 of the Developer Guide](DEVELOPER-GUIDE.md#43-migrating-from-2x-to-300). A
 > `veyra.config.ts` from 2.x no longer compiles: copy the new `VEYRA_CONFIG` shape and the
 > `VEYRA_CONNECTION` block from `veyra.config.example.ts`.
 

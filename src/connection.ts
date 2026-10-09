@@ -71,9 +71,9 @@ function bankBackend(settings: ConnectionSettings): string {
 
 /**
  * `directWithAssertion`: fetch a short-lived assertion for the signed-in user from **your bank
- * backend's endpoint** (`POST {base}/sdk-assertion`). Your backend signs a JWT with `iss`, `sub`,
- * `aud` equal to the `audience` the SDK passes here, `exp` ≤ 5 min, a unique `jti`, `acr`, and
- * `cnf.jkt` equal to the `jkt` the SDK passes here. Request `{"jkt": …, "audience": …}` with your
+ * backend's endpoint** (`POST {base}/sdk-assertion`). Your backend signs a JWT with at least `iss`,
+ * `sub`, `aud` equal to the `audience` the SDK passes here, `iat`, `exp` ≤ 5 min and a unique `jti`;
+ * `cnf.jkt` (the `jkt` the SDK passes here) and `acr` are optional. Request `{"jkt": …, "audience": …}` with your
  * app's session; response `{"assertion": "<compact JWT>"}`.
  * Resolves null when no user is signed in (no session, or 401) — the SDK then fails the call with
  * NOT_AUTHENTICATED and sends nothing; any other failure rejects, with the same effect.

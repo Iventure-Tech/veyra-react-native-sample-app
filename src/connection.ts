@@ -7,19 +7,16 @@ import {
 } from 'veyra-sdk-react-native';
 
 /**
- * The provider this app passes to `Veyra.initialize` — one for both SDKs — chosen in the
- * gitignored `veyra.config.ts` (copy `veyra.config.example.ts`). Which kind is the app's own
- * decision, so there is no default: an unset or unknown mode stops the app at launch, naming what
- * to set.
+ * The values the providers read, from the gitignored `veyra.config.ts` (copy
+ * `veyra.config.example.ts`). There is no mode: which provider the app passes is chosen in code,
+ * in {@link appProvider}, and each provider reads only its own values.
  */
 export interface ConnectionSettings {
-  /** 'directWithAssertion' | 'viaAppBackend' | 'directWithClientSecret' (deprecated). Required. */
-  mode: string;
-  /** OAuth client id issued by Veyra (directWithAssertion, directWithClientSecret). */
+  /** OAuth client id issued by Veyra (the assertion and client-secret providers). */
   clientId: string;
-  /** directWithClientSecret only — deprecated. */
+  /** The client-secret provider only — deprecated. */
   clientSecret: string;
-  /** Your bank backend (directWithAssertion, viaAppBackend), e.g. https://bank-backend.example */
+  /** Your bank backend (the assertion and proxy providers), e.g. https://bank-backend.example */
   bankBackendBaseUrl: string;
   /**
    * PLACEHOLDER for your bank app's own logged-in session, sent to your bank backend as a bearer
@@ -37,39 +34,32 @@ const setting = (v: string | undefined): string => {
 };
 
 /**
- * The provider for both SDKs. Each mode reads only its own settings: the client-secret provider
- * never sees the bank backend, and the backend providers never see a secret. Throws, naming the
- * setting, when the config is unusable.
+ * The provider this app passes to `Veyra.initialize` — one for both SDKs. There is no mode: the SDK
+ * works out how to reach Veyra from the kind of provider it is given, so switching is returning a
+ * different one here.
+ *
+ * Return ONE of the three. The sample ships with the client-secret provider so it runs with just
+ * your onboarding client id and secret — **for testing only**; a real app returns
+ * {@link assertionProvider} or {@link proxyProvider}.
  */
-export function appProvider(settings: ConnectionSettings, http: Fetch = fetch): VeyraProvider {
-  const mode = setting(settings.mode);
-  switch (mode) {
-    case 'directWithAssertion':
-      return assertionProvider(settings, http);
-    case 'viaAppBackend':
-      return proxyProvider(settings, http);
-    case 'directWithClientSecret':
-      return clientSecretProvider(settings);
-    default:
-      throw new Error(
-        `VEYRA_CONNECTION.mode is not set (got "${mode}"). Copy veyra.config.example.ts to ` +
-          "veyra.config.ts and choose 'directWithAssertion', 'viaAppBackend' or 'directWithClientSecret'."
-      );
-  }
+export function appProvider(settings: ConnectionSettings): VeyraProvider {
+  return clientSecretProvider(settings);
+  // return assertionProvider(settings);
+  // return proxyProvider(settings);
 }
 
-/** `directWithAssertion`: your client id, and the bank backend that signs the assertion. */
-function assertionProvider(settings: ConnectionSettings, http: Fetch): VeyraAssertionProvider {
+/** Your client id, and the bank backend that signs the assertion. */
+export function assertionProvider(settings: ConnectionSettings, http: Fetch = fetch): VeyraAssertionProvider {
   return bankBackendAssertionProvider(setting(settings.clientId), bankBackend(settings), bankSession(settings), http);
 }
 
-/** `viaAppBackend`: only the bank backend that relays the SDK's calls — no client id, no secret. */
-function proxyProvider(settings: ConnectionSettings, http: Fetch): VeyraProxyProvider {
+/** Only the bank backend that relays the SDK's calls — no client id, no secret. */
+export function proxyProvider(settings: ConnectionSettings, http: Fetch = fetch): VeyraProxyProvider {
   return bankBackendRelay(bankBackend(settings), bankSession(settings), http);
 }
 
-/** `directWithClientSecret` (deprecated, testing only): just the client id and secret. */
-function clientSecretProvider(settings: ConnectionSettings): VeyraClientSecretProvider {
+/** Deprecated, testing only: just the client id and secret. */
+export function clientSecretProvider(settings: ConnectionSettings): VeyraClientSecretProvider {
   return clientSecretCredentials(setting(settings.clientId), setting(settings.clientSecret));
 }
 
@@ -88,12 +78,12 @@ export function clientSecretCredentials(clientId: string, clientSecret: string):
 
 function bankBackend(settings: ConnectionSettings): string {
   const base = setting(settings.bankBackendBaseUrl).replace(/\/+$/, '');
-  if (!base) throw new Error('VEYRA_CONNECTION.bankBackendBaseUrl must be set in veyra.config.ts for this mode');
+  if (!base) throw new Error('VEYRA_CONNECTION.bankBackendBaseUrl must be set in veyra.config.ts for this provider');
   return base;
 }
 
 /**
- * `directWithAssertion`: fetch a short-lived assertion for the signed-in user from **your bank
+ * The assertion provider: fetch a short-lived assertion for the signed-in user from **your bank
  * backend's endpoint** (`POST {base}/sdk-assertion`). Your backend signs a JWT with at least `iss`,
  * `sub`, `aud` equal to the `audience` the SDK passes here, `iat`, `exp` ≤ 5 min and a unique `jti`;
  * `cnf.jkt` (the `jkt` the SDK passes here) and `acr` are optional. Request `{"audience": …, "jkt": …}` with your
@@ -141,7 +131,7 @@ export function parseAssertion(status: number, body: string): string | null {
 }
 
 /**
- * `viaAppBackend`: send every SDK call through **your bank backend**. The SDK's envelope goes,
+ * The proxy provider: send every SDK call through **your bank backend**. The SDK's envelope goes,
  * unchanged, as the body of `POST {base}/veyra-relay/{method}`; your backend authenticates to
  * Veyra with its own client-credentials token, forwards path/query/headers/body to the Veyra API
  * unmodified, and answers with Veyra's response body — returned here unchanged.

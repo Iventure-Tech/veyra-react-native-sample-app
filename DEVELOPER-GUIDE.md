@@ -99,14 +99,13 @@ on emulators or simulators.
 npm install
 cp veyra.config.example.ts veyra.config.ts
 # edit veyra.config.ts — your payment app provider id, token requestor id (and your
-# Apple Team ID for iOS), and VEYRA_CONNECTION: which provider to build (required, no
-# default — §4.2) plus what it needs
+# Apple Team ID for iOS), and VEYRA_CONNECTION: the values the provider needs (§4.2)
 ```
 
 `veyra.config.ts` is gitignored — real credentials never get committed. It holds
 everything **except** the customer and the provider: the app adds `customerId` when it
-initialises (§4.1), and builds the one `provider` for both SDKs from `VEYRA_CONNECTION`
-(§4.2). If you have a `veyra.config.ts` from an earlier checkout, copy the current shape
+initialises (§4.1), and builds the one `provider` for both SDKs in `src/connection.ts` from the values in
+`VEYRA_CONNECTION` (§4.2). If you have a `veyra.config.ts` from an earlier checkout, copy the current shape
 from `veyra.config.example.ts` — a 2.x one still carries `clientId` / `clientSecret` in the
 SDK blocks and no longer compiles.
 
@@ -325,15 +324,14 @@ await Veyra.initialize({
 Veyra's body unchanged; on failure it rejects with `VeyraRelayError` (the failure contract is
 below).
 
-This sample reads the kind from `VEYRA_CONNECTION` in `veyra.config.ts` (`mode`:
-`directWithAssertion` for its `VeyraAssertionProvider`, `viaAppBackend` for its `VeyraProxyProvider`;
-required — an unset one fails the launch with a message naming it) and builds the provider in
-`src/connection.ts`. Its two providers, from `bankBackendAssertionProvider` and `bankBackendRelay`,
-are short and meant to be copied. Each mode reads only its own settings: `directWithAssertion` needs
-`clientId` and `bankBackendBaseUrl`, `viaAppBackend` only `bankBackendBaseUrl`, and
-`directWithClientSecret` only `clientId` and `clientSecret`. The template `veyra.config.example.ts` ships with
-`'directWithClientSecret'`, the sample's `clientSecretCredentials` — a `VeyraClientSecretProvider`
-**for testing only**, so the sample runs before your backend has either endpoint.
+This sample has no mode setting either: `appProvider()` in `src/connection.ts` returns one
+provider, and to switch you return a different one — exactly what your own app does. Its two
+backend providers, from `bankBackendAssertionProvider` and `bankBackendRelay`, are short and meant
+to be copied; each reads only its own values from `VEYRA_CONNECTION` in `veyra.config.ts` (the
+assertion provider: `clientId` and `bankBackendBaseUrl`; the proxy provider: `bankBackendBaseUrl`).
+The sample ships returning `clientSecretCredentials` — a `VeyraClientSecretProvider` **for testing
+only** that needs just `clientId` and `clientSecret` — so it runs before your backend has either
+endpoint.
 
 **Your bank backend — the two endpoints the sample calls.** `VeyraAssertionProvider` and
 `VeyraProxyProvider` each need one endpoint on **your** backend. Both are authenticated with your app's
@@ -480,8 +478,8 @@ a `VeyraProxyProvider`.
 
 2. **Handle `NOT_AUTHENTICATED`** (§9) — the SDK could not obtain credentials, so nothing was sent.
 3. **Update `veyra.config.ts`** if you run this sample: copy the new `VEYRA_CONFIG` shape (no
-   credentials in it) and the `VEYRA_CONNECTION` block from `veyra.config.example.ts`, then set
-   `mode`.
+   credentials in it) and the `VEYRA_CONNECTION` block from `veyra.config.example.ts`, then choose the provider in
+   `appProvider()` (`src/connection.ts`).
 4. Apps still on 2.x keep working while you migrate.
 
 ## 5. Sessions — how payment screens work in React Native

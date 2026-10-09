@@ -40,8 +40,9 @@ interface SessionApi {
 const SessionContext = createContext<SessionApi | null>(null);
 
 async function initializeFor(customerId: string): Promise<void> {
-  // How both SDKs reach Veyra — one provider, from veyra.config.ts. An unset mode throws here,
-  // naming the setting, and the launch shows it — there is no default.
+  // How both SDKs reach Veyra — one provider, chosen in src/connection.ts (appProvider) from the
+  // values in veyra.config.ts. A missing value it needs throws here, naming it, and the launch
+  // shows it.
   return Veyra.initialize({
     customerId,
     provider: appProvider(VEYRA_CONNECTION),

@@ -6,6 +6,9 @@
 import { describe, expect, it, jest } from '@jest/globals';
 import {
   appProvider,
+  assertionProvider,
+  clientSecretProvider,
+  proxyProvider,
   bankBackendAssertionProvider,
   bankBackendRelay,
   parseAssertion,
@@ -39,7 +42,6 @@ function fakeFetch(answers: Array<{ status: number; body: string } | Error>) {
 }
 
 const settings = (over: Partial<ConnectionSettings> = {}): ConnectionSettings => ({
-  mode: 'viaAppBackend',
   clientId: 'id',
   clientSecret: 'secret',
   bankBackendBaseUrl: 'https://bank.example/',
@@ -48,50 +50,41 @@ const settings = (over: Partial<ConnectionSettings> = {}): ConnectionSettings =>
 });
 
 describe('appProvider', () => {
-  it('builds each kind of provider', () => {
-    const secret = appProvider(settings({ mode: 'directWithClientSecret' }));
-    expect(secret.providerType).toBe('AUTHENTICATION');
-    expect('clientSecret' in secret).toBe(true);
-    const auth = appProvider(settings({ mode: 'directWithAssertion' }));
+  it('has no mode: the sample ships the testing-only client-secret provider', () => {
+    const p = appProvider(settings()) as { providerType: string; clientId: string; clientSecret: string };
+    expect(p.providerType).toBe('AUTHENTICATION');
+    expect(p.clientSecret).toBe('secret');
+  });
+});
+
+describe('each provider reads only its own values', () => {
+  it('the assertion provider carries the client id', () => {
+    const auth = assertionProvider(settings());
     expect(auth.providerType).toBe('AUTHENTICATION');
-    expect(typeof (auth as { assertion?: unknown }).assertion).toBe('function');
-    expect((auth as { clientId: string }).clientId).toBe('id');
-    const proxy = appProvider(settings({ mode: 'viaAppBackend' }));
-    expect(proxy.providerType).toBe('REQUEST_PROCESSOR');
+    expect(typeof auth.assertion).toBe('function');
+    expect(auth.clientId).toBe('id');
   });
 
-  it('has no default: an unset or unknown mode fails loudly, naming the setting', () => {
-    expect(() => appProvider(settings({ mode: '' }))).toThrow(/VEYRA_CONNECTION\.mode/);
-    expect(() => appProvider(settings({ mode: 'clientCredentials' }))).toThrow(/VEYRA_CONNECTION\.mode/);
+  it('the proxy provider needs no client id or secret', () => {
+    const p = proxyProvider(settings({ clientId: '', clientSecret: '' }));
+    expect(p.providerType).toBe('REQUEST_PROCESSOR');
+    expect('clientId' in p).toBe(false);
   });
 
-  it('the bank-backend modes need the bank backend URL', () => {
-    expect(() => appProvider(settings({ mode: 'viaAppBackend', bankBackendBaseUrl: '' }))).toThrow(
-      /bankBackendBaseUrl/
-    );
-    expect(() => appProvider(settings({ mode: 'directWithAssertion', bankBackendBaseUrl: ' ' }))).toThrow(
-      /bankBackendBaseUrl/
-    );
-  });
-
-  it('the client-secret mode reads only the client id and secret, never the bank backend', () => {
-    const c = appProvider(
-      settings({ mode: 'directWithClientSecret', bankBackendBaseUrl: '', bankSessionToken: '' })
-    ) as { clientId: string; clientSecret: string };
+  it('the client-secret provider never reads the bank backend', () => {
+    const c = clientSecretProvider(settings({ bankBackendBaseUrl: '', bankSessionToken: '' }));
     expect(c.clientId).toBe('id');
     expect(c.clientSecret).toBe('secret');
     expect(Object.keys(c).sort()).toEqual(['clientId', 'clientSecret', 'providerType']);
   });
 
-  it('the proxy mode needs no client id or secret', () => {
-    const p = appProvider(settings({ mode: 'viaAppBackend', clientId: '', clientSecret: '' }));
-    expect(p.providerType).toBe('REQUEST_PROCESSOR');
-    expect('clientId' in p).toBe(false);
+  it('the bank-backend providers need the bank backend URL', () => {
+    expect(() => proxyProvider(settings({ bankBackendBaseUrl: '' }))).toThrow(/bankBackendBaseUrl/);
+    expect(() => assertionProvider(settings({ bankBackendBaseUrl: ' ' }))).toThrow(/bankBackendBaseUrl/);
   });
 
   it('treats untouched template values as unset', () => {
-    const c = appProvider(settings({ mode: 'directWithClientSecret', clientId: 'your-client-id' }));
-    expect((c as { clientId: string }).clientId).toBe('');
+    expect(clientSecretProvider(settings({ clientId: 'your-client-id' })).clientId).toBe('');
   });
 });
 

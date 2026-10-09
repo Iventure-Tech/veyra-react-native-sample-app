@@ -105,13 +105,6 @@ short, and meant to be copied. The proxy provider is called from the SDK's backg
 from screens. The full contract — the assertion's claims, the request envelope, and how a proxy
 provider reports a failure — is in [§4.2 of the Developer Guide](DEVELOPER-GUIDE.md#42-connect-to-veyra--choosing-a-provider).
 
-> **Upgrading from SDK 2.x?** The config blocks no longer take `clientId` / `clientSecret`;
-> `Veyra.initialize` takes one `provider` instead: a `VeyraAssertionProvider` (recommended) or a
-> `VeyraProxyProvider`. See
-> [§4.3 of the Developer Guide](DEVELOPER-GUIDE.md#43-migrating-from-2x-to-300). A
-> `veyra.config.ts` from 2.x no longer compiles: copy the new `VEYRA_CONFIG` shape and the
-> `VEYRA_CONNECTION` block from `veyra.config.example.ts`.
-
 ## Where things are
 
 | Path | What it shows |

@@ -30,8 +30,11 @@ export const VEYRA_CONFIG: {
 };
 
 /**
- * Which provider the app builds for both SDKs. `mode` is REQUIRED, with no default — the app
- * refuses to start until it is set. One of:
+ * Which provider the app builds for both SDKs. `mode` is REQUIRED — the app refuses to start
+ * without it. This template sets 'directWithClientSecret' (the deprecated
+ * VeyraClientSecretProvider) so the sample runs against Veyra with just the client id and secret
+ * from your onboarding pack — FOR TESTING ONLY. A real app uses 'directWithAssertion' or
+ * 'viaAppBackend'. One of:
  *  - 'directWithAssertion'    a VeyraAuthProvider: the SDK calls Veyra with an assertion your bank
  *                             backend signs (needs clientId + bankBackendBaseUrl; your backend
  *                             serves POST /sdk-assertion)
@@ -42,7 +45,7 @@ export const VEYRA_CONFIG: {
  *                             app (needs clientId + clientSecret); retired per provider
  */
 export const VEYRA_CONNECTION: ConnectionSettings = {
-  mode: '',
+  mode: 'directWithClientSecret',
   // OAuth client issued by Veyra. clientId: directWithAssertion and directWithClientSecret.
   // clientSecret: directWithClientSecret only.
   clientId: 'your-client-id',

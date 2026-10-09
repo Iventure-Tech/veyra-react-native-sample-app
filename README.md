@@ -52,8 +52,11 @@ catalogue — lives in this repository.
    # edit veyra.config.ts
    ```
 
-   Set `VEYRA_CONNECTION.mode` — there is no default, and the app shows a setup error at
-   launch until it is set (see [Choose a provider](#choose-a-provider)).
+   `VEYRA_CONNECTION.mode` comes set to `'directWithClientSecret'` — the deprecated
+   `VeyraClientSecretProvider`, **for testing only** — so the sample runs with just your
+   `clientId` and `clientSecret`. Switch it to `'directWithAssertion'` or `'viaAppBackend'` to try
+   the providers a real app ships (see [Choose a provider](#choose-a-provider)). It is required:
+   with it blank the app shows a setup error at launch.
 
 3. **Android** — add your artifact-repository credentials to
    `~/.gradle/gradle.properties`:

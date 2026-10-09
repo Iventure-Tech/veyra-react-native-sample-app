@@ -326,10 +326,12 @@ Veyra's body unchanged; on failure it rejects with `VeyraRelayError` (the failur
 below).
 
 This sample reads the kind from `VEYRA_CONNECTION` in `veyra.config.ts` (`mode`:
-`directWithAssertion` for its `VeyraAuthProvider`, `viaAppBackend` for its `VeyraProxyProvider`; no
-default — an unset one fails the launch with a message naming it) and builds the provider in
+`directWithAssertion` for its `VeyraAuthProvider`, `viaAppBackend` for its `VeyraProxyProvider`;
+required — an unset one fails the launch with a message naming it) and builds the provider in
 `src/connection.ts`. Its two providers, from `bankBackendAssertionProvider` and `bankBackendRelay`,
-are short and meant to be copied.
+are short and meant to be copied. The template `veyra.config.example.ts` ships with
+`'directWithClientSecret'`, the sample's `clientSecretCredentials` — a `VeyraClientSecretProvider`
+**for testing only**, so the sample runs before your backend has either endpoint.
 
 **Your bank backend — the two endpoints the sample calls.** `VeyraAuthProvider` and
 `VeyraProxyProvider` each need one endpoint on **your** backend. Both are authenticated with your app's

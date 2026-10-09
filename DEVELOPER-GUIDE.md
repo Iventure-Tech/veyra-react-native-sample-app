@@ -272,9 +272,7 @@ a fallback from one to the other.
 | `VeyraProxyProvider` | `'REQUEST_PROCESSOR'` | calls **nothing** itself — every backend call goes through your provider to **your backend** | you want all traffic through your own backend, or cannot run a signer |
 
 **`providerType` says which kind it is.** A JavaScript object can't inherit a default, so you write
-it out; the SDK checks it against the functions your object has. The deprecated
-`VeyraClientSecretProvider` exists only so apps already on client credentials keep working until
-their cut-over date; don't build a new integration on it.
+it out; the SDK checks it against the functions your object has.
 
 - **An unusable provider rejects `Veyra.initialize` with `VALIDATION`, naming the problem**: no
   provider; an object with both `assertion` and the request functions; a `providerType` that
@@ -445,11 +443,6 @@ protected, so your backend can neither read nor forge those. It **can** read acc
 fields and could alter plain answers such as a transaction status — which is why only the issuing
 bank or payment app provider itself, the party already trusted with those fields, may operate a
 proxy provider, and why it must forward bytes unmodified.
-
-**`VeyraClientSecretProvider` is deprecated.** It exists only so apps already on client credentials
-keep working until their provider's cut-over date; it is retired provider by provider. Don't build a
-new integration on it: a secret shipped inside an app can be extracted. Use a `VeyraAssertionProvider` or
-a `VeyraProxyProvider`.
 
 ## 5. Sessions — how payment screens work in React Native
 

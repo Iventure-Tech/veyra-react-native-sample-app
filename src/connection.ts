@@ -169,7 +169,7 @@ export function bankBackendRelay(
     return body; // Veyra's body, unmodified
   };
   return {
-    providerType: 'REQUEST_PROCESSOR',
+    providerType: 'PROXY',
     post: forward('post'),
     get: forward('get'),
     put: forward('put'),

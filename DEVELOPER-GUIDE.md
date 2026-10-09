@@ -274,7 +274,7 @@ a fallback from one to the other.
 | Provider | `providerType` | The SDK… | Choose it when |
 |---|---|---|---|
 | `VeyraAssertionProvider` | `'AUTHENTICATION'` | calls Veyra itself, with a short-lived **assertion your backend signs** for the signed-in user | your backend can sign a JWT for the user (recommended) |
-| `VeyraProxyProvider` | `'REQUEST_PROCESSOR'` | calls **nothing** itself — every backend call goes through your provider to **your backend** | you want all traffic through your own backend, or cannot run a signer |
+| `VeyraProxyProvider` | `'PROXY'` | calls **nothing** itself — every backend call goes through your provider to **your backend** | you want all traffic through your own backend, or cannot run a signer |
 
 **`providerType` says which kind it is.** A JavaScript object can't inherit a default, so you write
 it out; the SDK checks it against the functions your object has. The deprecated
@@ -288,8 +288,7 @@ their cut-over date; don't build a new integration on it.
   at the first payment. Initialising again with the other kind rejects too.
 - **A call is never sent without credentials.** When the SDK cannot obtain a token the call rejects
   with `NOT_AUTHENTICATED` and nothing is sent (§9).
-- Every backend call the SDK makes carries an `X-Veyra-Connection` header (`DIRECT_ASSERTION`,
-  `VIA_APP_BACKEND` or `DIRECT_CLIENT_SECRET`) and an `X-Veyra-Sdk-Version` header.
+- Every backend call the SDK makes carries an `X-Veyra-Provider-Type` header (your provider's `providerType`: `AUTHENTICATION` or `PROXY`) and an `X-Veyra-Sdk-Version` header.
 
 **Implementing a provider, then initialising with it:**
 
@@ -305,7 +304,7 @@ const provider: VeyraAssertionProvider = {
 
 // …or VeyraProxyProvider: five functions, one per HTTP method, called for every backend call.
 const provider: VeyraProxyProvider = {
-  providerType: 'REQUEST_PROCESSOR',
+  providerType: 'PROXY',
   post: forward('post'), get: forward('get'), put: forward('put'),
   delete: forward('delete'), patch: forward('patch'),
 };
@@ -407,7 +406,7 @@ towards Veyra:
   "v": 1,
   "path": "/paymentgateway/v1/payment",
   "query": { "merchant_id": "…" },
-  "headers": { "Content-Type": "application/json", "X-Veyra-Sdk-Version": "3.0.0", "X-Veyra-Connection": "VIA_APP_BACKEND" },
+  "headers": { "Content-Type": "application/json", "X-Veyra-Sdk-Version": "3.0.0", "X-Veyra-Provider-Type": "PROXY" },
   "body": "<the request JSON, as a string>"
 }
 ```

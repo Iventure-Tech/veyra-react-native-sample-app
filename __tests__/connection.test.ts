@@ -67,7 +67,7 @@ describe('each provider reads only its own values', () => {
 
   it('the proxy provider needs no client id or secret', () => {
     const p = proxyProvider(settings({ clientId: '', clientSecret: '' }));
-    expect(p.providerType).toBe('REQUEST_PROCESSOR');
+    expect(p.providerType).toBe('PROXY');
     expect('clientId' in p).toBe(false);
   });
 

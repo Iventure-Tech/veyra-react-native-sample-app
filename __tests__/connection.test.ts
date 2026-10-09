@@ -5,7 +5,7 @@
  */
 import { describe, expect, it, jest } from '@jest/globals';
 import {
-  appConnection,
+  appProvider,
   bankBackendAssertionProvider,
   bankBackendRelay,
   parseAssertion,
@@ -47,38 +47,46 @@ const settings = (over: Partial<ConnectionSettings> = {}): ConnectionSettings =>
   ...over,
 });
 
-describe('appConnection', () => {
-  it('builds each mode', () => {
-    expect(appConnection(settings({ mode: 'directWithClientSecret' })).mode).toBe('directWithClientSecret');
-    expect(appConnection(settings({ mode: 'directWithAssertion' })).mode).toBe('directWithAssertion');
-    expect(appConnection(settings({ mode: 'viaAppBackend' })).mode).toBe('viaAppBackend');
+describe('appProvider', () => {
+  it('builds each kind of provider', () => {
+    const secret = appProvider(settings({ mode: 'directWithClientSecret' }));
+    expect(secret.providerType).toBe('AUTHENTICATION');
+    expect('clientSecret' in secret).toBe(true);
+    const auth = appProvider(settings({ mode: 'directWithAssertion' }));
+    expect(auth.providerType).toBe('AUTHENTICATION');
+    expect(typeof (auth as { assertion?: unknown }).assertion).toBe('function');
+    expect((auth as { clientId: string }).clientId).toBe('id');
+    const proxy = appProvider(settings({ mode: 'viaAppBackend' }));
+    expect(proxy.providerType).toBe('REQUEST_PROCESSOR');
   });
 
   it('has no default: an unset or unknown mode fails loudly, naming the setting', () => {
-    expect(() => appConnection(settings({ mode: '' }))).toThrow(/VEYRA_CONNECTION\.mode/);
-    expect(() => appConnection(settings({ mode: 'clientCredentials' }))).toThrow(/VEYRA_CONNECTION\.mode/);
+    expect(() => appProvider(settings({ mode: '' }))).toThrow(/VEYRA_CONNECTION\.mode/);
+    expect(() => appProvider(settings({ mode: 'clientCredentials' }))).toThrow(/VEYRA_CONNECTION\.mode/);
   });
 
   it('the bank-backend modes need the bank backend URL', () => {
-    expect(() => appConnection(settings({ mode: 'viaAppBackend', bankBackendBaseUrl: '' }))).toThrow(
+    expect(() => appProvider(settings({ mode: 'viaAppBackend', bankBackendBaseUrl: '' }))).toThrow(
       /bankBackendBaseUrl/
     );
-    expect(() => appConnection(settings({ mode: 'directWithAssertion', bankBackendBaseUrl: ' ' }))).toThrow(
+    expect(() => appProvider(settings({ mode: 'directWithAssertion', bankBackendBaseUrl: ' ' }))).toThrow(
       /bankBackendBaseUrl/
     );
   });
 
   it('treats untouched template values as unset', () => {
-    const c = appConnection(settings({ mode: 'directWithClientSecret', clientId: 'your-client-id' }));
-    expect(c.mode === 'directWithClientSecret' && c.clientId).toBe('');
+    const c = appProvider(settings({ mode: 'directWithClientSecret', clientId: 'your-client-id' }));
+    expect((c as { clientId: string }).clientId).toBe('');
   });
 });
 
 describe('bankBackendAssertionProvider', () => {
   it('posts the thumbprint and audience with the bank session and returns the assertion', async () => {
     const { http, calls } = fakeFetch([{ status: 200, body: '{"assertion":"eyJ.a.b"}' }]);
-    const provider = bankBackendAssertionProvider('https://bank.example', () => 'bank-session', http);
-    await expect(provider('https://api.uat.veyra.co', 'JKT-1')).resolves.toBe('eyJ.a.b');
+    const provider = bankBackendAssertionProvider('client-id', 'https://bank.example', () => 'bank-session', http);
+    expect(provider.providerType).toBe('AUTHENTICATION');
+    expect(provider.clientId).toBe('client-id');
+    await expect(provider.assertion('https://api.uat.veyra.co', 'JKT-1')).resolves.toBe('eyJ.a.b');
     expect(calls[0].url).toBe('https://bank.example/sdk-assertion');
     expect(calls[0].init.method).toBe('POST');
     expect(JSON.parse(calls[0].init.body as string)).toEqual({ audience: 'https://api.uat.veyra.co', jkt: 'JKT-1' });
@@ -87,7 +95,7 @@ describe('bankBackendAssertionProvider', () => {
 
   it('no session means no assertion and no call', async () => {
     const { http, calls } = fakeFetch([]);
-    await expect(bankBackendAssertionProvider('https://bank.example', () => null, http)('https://api.uat.veyra.co', 'JKT')).resolves.toBeNull();
+    await expect(bankBackendAssertionProvider('client-id', 'https://bank.example', () => null, http).assertion('https://api.uat.veyra.co', 'JKT')).resolves.toBeNull();
     expect(calls).toHaveLength(0);
   });
 

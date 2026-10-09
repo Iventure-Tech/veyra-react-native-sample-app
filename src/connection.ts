@@ -1,15 +1,16 @@
 import {
   VeyraRelayError,
-  type AssertionProvider,
-  type VeyraConnection,
-  type ViaAppBackendConnection,
+  type VeyraAuthProvider,
+  type VeyraClientSecretProvider,
+  type VeyraProvider,
+  type VeyraProxyProvider,
 } from 'veyra-sdk-react-native';
 
 /**
- * How this app connects both SDKs to Veyra, from the gitignored `veyra.config.ts` (copy
- * `veyra.config.example.ts`). The connection mode is the app's own decision, so there is no
- * default: an unset or unknown mode stops the app at launch, naming what to set. Both SDKs use
- * the same mode here for simplicity; a real app may choose per SDK.
+ * The provider this app passes to `Veyra.initialize` — one for both SDKs — chosen in the
+ * gitignored `veyra.config.ts` (copy `veyra.config.example.ts`). Which kind is the app's own
+ * decision, so there is no default: an unset or unknown mode stops the app at launch, naming what
+ * to set.
  */
 export interface ConnectionSettings {
   /** 'directWithAssertion' | 'viaAppBackend' | 'directWithClientSecret' (deprecated). Required. */
@@ -35,24 +36,15 @@ const setting = (v: string | undefined): string => {
   return t.startsWith('your-') ? '' : t;
 };
 
-/** The connection for either SDK. Throws, naming the setting, when the config is unusable. */
-export function appConnection(settings: ConnectionSettings, http: Fetch = fetch): VeyraConnection {
+/** The provider for both SDKs. Throws, naming the setting, when the config is unusable. */
+export function appProvider(settings: ConnectionSettings, http: Fetch = fetch): VeyraProvider {
   const mode = setting(settings.mode);
   const session = () => setting(settings.bankSessionToken) || null;
   switch (mode) {
     case 'directWithClientSecret':
-      // Deprecated: a secret inside an app can be extracted. Retired per provider.
-      return {
-        mode: 'directWithClientSecret',
-        clientId: setting(settings.clientId),
-        clientSecret: setting(settings.clientSecret),
-      };
+      return clientSecretCredentials(setting(settings.clientId), setting(settings.clientSecret));
     case 'directWithAssertion':
-      return {
-        mode: 'directWithAssertion',
-        clientId: setting(settings.clientId),
-        assertionProvider: bankBackendAssertionProvider(bankBackend(settings), session, http),
-      };
+      return bankBackendAssertionProvider(setting(settings.clientId), bankBackend(settings), session, http);
     case 'viaAppBackend':
       return bankBackendRelay(bankBackend(settings), session, http);
     default:
@@ -61,6 +53,15 @@ export function appConnection(settings: ConnectionSettings, http: Fetch = fetch)
           "veyra.config.ts and choose 'directWithAssertion', 'viaAppBackend' or 'directWithClientSecret'."
       );
   }
+}
+
+/**
+ * The deprecated client-secret provider — **for testing only**, e.g. against UAT before your bank
+ * backend can sign assertions. A secret inside an app can be extracted: ship
+ * {@link bankBackendAssertionProvider} or {@link bankBackendRelay} instead.
+ */
+export function clientSecretCredentials(clientId: string, clientSecret: string): VeyraClientSecretProvider {
+  return { providerType: 'AUTHENTICATION', clientId, clientSecret };
 }
 
 function bankBackend(settings: ConnectionSettings): string {
@@ -79,20 +80,25 @@ function bankBackend(settings: ConnectionSettings): string {
  * NOT_AUTHENTICATED and sends nothing; any other failure rejects, with the same effect.
  */
 export function bankBackendAssertionProvider(
+  clientId: string,
   baseUrl: string,
   session: () => string | null,
   http: Fetch = fetch
-): AssertionProvider {
-  return async (audience, jkt) => {
-    const token = session();
-    if (!token) return null; // logged out
-    const res = await http(`${baseUrl}/sdk-assertion`, {
-      method: 'POST',
-      // Your bank session, not a Veyra credential.
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ audience, jkt }),
-    });
-    return parseAssertion(res.status, await res.text());
+): VeyraAuthProvider {
+  return {
+    providerType: 'AUTHENTICATION',
+    clientId, // the OAuth client id Veyra issued to this app (public, not a secret)
+    assertion: async (audience, jkt) => {
+      const token = session();
+      if (!token) return null; // logged out
+      const res = await http(`${baseUrl}/sdk-assertion`, {
+        method: 'POST',
+        // Your bank session, not a Veyra credential.
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ audience, jkt }),
+      });
+      return parseAssertion(res.status, await res.text());
+    },
   };
 }
 
@@ -125,7 +131,7 @@ export function bankBackendRelay(
   baseUrl: string,
   session: () => string | null,
   http: Fetch = fetch
-): ViaAppBackendConnection {
+): VeyraProxyProvider {
   const forward = (method: string) => async (envelope: string): Promise<string> => {
     const token = session();
     let res: Response;
@@ -151,7 +157,7 @@ export function bankBackendRelay(
     return body; // Veyra's body, unmodified
   };
   return {
-    mode: 'viaAppBackend',
+    providerType: 'REQUEST_PROCESSOR',
     post: forward('post'),
     get: forward('get'),
     put: forward('put'),

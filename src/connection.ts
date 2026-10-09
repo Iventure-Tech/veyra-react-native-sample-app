@@ -72,8 +72,9 @@ function bankBackend(settings: ConnectionSettings): string {
 /**
  * `directWithAssertion`: fetch a short-lived assertion for the signed-in user from **your bank
  * backend's endpoint** (`POST {base}/sdk-assertion`). Your backend signs a JWT with `iss`, `sub`,
- * `aud`, `exp` ≤ 5 min, a unique `jti`, `acr`, and `cnf.jkt` equal to the `jkt` the SDK passes
- * here. Request `{"jkt": …}` with your app's session; response `{"assertion": "<compact JWT>"}`.
+ * `aud` equal to the `audience` the SDK passes here, `exp` ≤ 5 min, a unique `jti`, `acr`, and
+ * `cnf.jkt` equal to the `jkt` the SDK passes here. Request `{"jkt": …, "audience": …}` with your
+ * app's session; response `{"assertion": "<compact JWT>"}`.
  * Resolves null when no user is signed in (no session, or 401) — the SDK then fails the call with
  * NOT_AUTHENTICATED and sends nothing; any other failure rejects, with the same effect.
  */
@@ -82,14 +83,14 @@ export function bankBackendAssertionProvider(
   session: () => string | null,
   http: Fetch = fetch
 ): AssertionProvider {
-  return async (jkt) => {
+  return async (jkt, audience) => {
     const token = session();
     if (!token) return null; // logged out
     const res = await http(`${baseUrl}/sdk-assertion`, {
       method: 'POST',
       // Your bank session, not a Veyra credential.
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ jkt }),
+      body: JSON.stringify({ jkt, audience }),
     });
     return parseAssertion(res.status, await res.text());
   };

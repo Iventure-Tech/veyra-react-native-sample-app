@@ -93,7 +93,7 @@ from `VEYRA_CONNECTION` in `veyra.config.ts`:
 
 | `mode` | What it needs | Your bank backend serves |
 |---|---|---|
-| `directWithAssertion` (recommended) | `clientId`, `bankBackendBaseUrl` | `POST /sdk-assertion` `{"jkt": …}` → `{"assertion": "<JWT>"}` (401 when nobody is signed in) |
+| `directWithAssertion` (recommended) | `clientId`, `bankBackendBaseUrl` | `POST /sdk-assertion` `{"jkt": …, "audience": …}` → `{"assertion": "<JWT>"}` (401 when nobody is signed in) |
 | `viaAppBackend` | `bankBackendBaseUrl` | `POST /veyra-relay/{post\|get\|put\|delete\|patch}` — forwards the SDK's envelope to Veyra unmodified and answers with Veyra's body |
 | `directWithClientSecret` (**deprecated**) | `clientId`, `clientSecret` | nothing — the secret sits in the app, which is why this mode is being retired |
 

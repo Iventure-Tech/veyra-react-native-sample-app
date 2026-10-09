@@ -7,7 +7,7 @@ import type { VeyraSoftposConfig, VeyraWalletConfig } from 'veyra-sdk-react-nati
 import type { ConnectionSettings } from './src/connection';
 
 // Everything except the customer and the provider: the app adds `customerId` (whoever it has
-// signed in) and the one `provider` for both SDKs (built from VEYRA_CONNECTION below) when it
+// signed in) and the one `provider` for both SDKs (built in src/connection.ts from VEYRA_CONNECTION below) when it
 // calls Veyra.initialize — see src/session.tsx and src/connection.ts.
 export const VEYRA_CONFIG: {
   softpos: VeyraSoftposConfig;
@@ -30,27 +30,21 @@ export const VEYRA_CONFIG: {
 };
 
 /**
- * Which provider the app builds for both SDKs. `mode` is REQUIRED — the app refuses to start
- * without it. This template sets 'directWithClientSecret' (the deprecated
- * VeyraClientSecretProvider) so the sample runs against Veyra with just the client id and secret
- * from your onboarding pack — FOR TESTING ONLY. A real app uses 'directWithAssertion' or
- * 'viaAppBackend'. One of:
- *  - 'directWithAssertion'    a VeyraAssertionProvider: the SDK calls Veyra with an assertion your bank
- *                             backend signs (needs clientId + bankBackendBaseUrl; your backend
- *                             serves POST /sdk-assertion)
- *  - 'viaAppBackend'          a VeyraProxyProvider: the SDK calls nothing itself; every call goes
- *                             through your bank backend (needs bankBackendBaseUrl; your backend
- *                             serves POST /veyra-relay/{method})
- *  - 'directWithClientSecret' DEPRECATED — the SDK calls Veyra with a client secret held in the
- *                             app (needs clientId + clientSecret); retired per provider
+ * The values for the provider both SDKs use. There is no mode to set: the SDK works out how to
+ * reach Veyra from the provider the app passes. Which one the sample builds is chosen in code, in
+ * appProvider() in src/connection.ts. It ships with the deprecated client-secret provider so the
+ * sample runs with just the client id and secret from your onboarding pack — FOR TESTING ONLY.
+ * Each provider reads only its own values:
+ *  - assertion provider      clientId + bankBackendBaseUrl (your backend serves POST /sdk-assertion)
+ *  - proxy provider          bankBackendBaseUrl (your backend serves POST /veyra-relay/{method})
+ *  - client-secret provider  DEPRECATED — clientId + clientSecret held in the app
  */
 export const VEYRA_CONNECTION: ConnectionSettings = {
-  mode: 'directWithClientSecret',
-  // OAuth client issued by Veyra. clientId: directWithAssertion and directWithClientSecret.
-  // clientSecret: directWithClientSecret only.
+  // OAuth client issued by Veyra. clientId: the assertion and client-secret providers.
+  // clientSecret: the client-secret provider only.
   clientId: 'your-client-id',
   clientSecret: 'your-client-secret',
-  // Your bank backend (directWithAssertion and viaAppBackend), e.g. 'https://bank-backend.example'.
+  // Your bank backend (the assertion and proxy providers), e.g. 'https://bank-backend.example'.
   bankBackendBaseUrl: '',
   // PLACEHOLDER for your bank app's own logged-in session, sent to your bank backend as
   // "Authorization: Bearer <token>"; empty means nobody is signed in. A real app uses its own

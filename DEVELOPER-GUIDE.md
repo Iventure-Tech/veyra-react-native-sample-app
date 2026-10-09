@@ -274,7 +274,7 @@ a fallback from one to the other.
 
 | Provider | `providerType` | The SDK… | Choose it when |
 |---|---|---|---|
-| `VeyraAuthProvider` | `'AUTHENTICATION'` | calls Veyra itself, with a short-lived **assertion your backend signs** for the signed-in user | your backend can sign a JWT for the user (recommended) |
+| `VeyraAssertionProvider` | `'AUTHENTICATION'` | calls Veyra itself, with a short-lived **assertion your backend signs** for the signed-in user | your backend can sign a JWT for the user (recommended) |
 | `VeyraProxyProvider` | `'REQUEST_PROCESSOR'` | calls **nothing** itself — every backend call goes through your provider to **your backend** | you want all traffic through your own backend, or cannot run a signer |
 
 **`providerType` says which kind it is.** A JavaScript object can't inherit a default, so you write
@@ -295,10 +295,10 @@ their cut-over date; don't build a new integration on it.
 **Implementing a provider, then initialising with it:**
 
 ```ts
-import Veyra, { type VeyraAuthProvider, type VeyraProxyProvider } from 'veyra-sdk-react-native';
+import Veyra, { type VeyraAssertionProvider, type VeyraProxyProvider } from 'veyra-sdk-react-native';
 
-// VeyraAuthProvider (recommended): your client id, and one function the SDK calls when it needs a token.
-const provider: VeyraAuthProvider = {
+// VeyraAssertionProvider (recommended): your client id, and one function the SDK calls when it needs a token.
+const provider: VeyraAssertionProvider = {
   providerType: 'AUTHENTICATION',
   clientId: 'your-client-id',                                       // public, issued at onboarding
   assertion: (audience, jkt) => myBankApi.sdkAssertion(audience, jkt), // Promise<JWT | null>
@@ -326,20 +326,22 @@ Veyra's body unchanged; on failure it rejects with `VeyraRelayError` (the failur
 below).
 
 This sample reads the kind from `VEYRA_CONNECTION` in `veyra.config.ts` (`mode`:
-`directWithAssertion` for its `VeyraAuthProvider`, `viaAppBackend` for its `VeyraProxyProvider`;
+`directWithAssertion` for its `VeyraAssertionProvider`, `viaAppBackend` for its `VeyraProxyProvider`;
 required — an unset one fails the launch with a message naming it) and builds the provider in
 `src/connection.ts`. Its two providers, from `bankBackendAssertionProvider` and `bankBackendRelay`,
-are short and meant to be copied. The template `veyra.config.example.ts` ships with
+are short and meant to be copied. Each mode reads only its own settings: `directWithAssertion` needs
+`clientId` and `bankBackendBaseUrl`, `viaAppBackend` only `bankBackendBaseUrl`, and
+`directWithClientSecret` only `clientId` and `clientSecret`. The template `veyra.config.example.ts` ships with
 `'directWithClientSecret'`, the sample's `clientSecretCredentials` — a `VeyraClientSecretProvider`
 **for testing only**, so the sample runs before your backend has either endpoint.
 
-**Your bank backend — the two endpoints the sample calls.** `VeyraAuthProvider` and
+**Your bank backend — the two endpoints the sample calls.** `VeyraAssertionProvider` and
 `VeyraProxyProvider` each need one endpoint on **your** backend. Both are authenticated with your app's
 **own** session (the sample sends a placeholder bearer token, `VEYRA_CONNECTION.bankSessionToken` —
 replace it with your login session); neither is a Veyra credential.
 
 ```
-POST {your backend}/sdk-assertion                          (VeyraAuthProvider)
+POST {your backend}/sdk-assertion                          (VeyraAssertionProvider)
      {"audience": "<audience>", "jkt": "<jkt>"}
   →  200 {"assertion": "<compact JWT>"}     401 when no user is signed in (resolve null)
 
@@ -453,14 +455,14 @@ proxy provider, and why it must forward bytes unmodified.
 
 **`VeyraClientSecretProvider` is deprecated.** It exists only so apps already on client credentials
 keep working until their provider's cut-over date; it is retired provider by provider. Don't build a
-new integration on it: a secret shipped inside an app can be extracted. Use a `VeyraAuthProvider` or
+new integration on it: a secret shipped inside an app can be extracted. Use a `VeyraAssertionProvider` or
 a `VeyraProxyProvider`.
 
 ### 4.3 Migrating from 2.x to 3.0.0
 
 1. **Replace `clientId` / `clientSecret` with one `provider`**, passed to `Veyra.initialize` and
    shared by both SDKs (§4.2). Either your backend signs an assertion for the signed-in user
-   (`VeyraAuthProvider`), or every call goes through your backend (`VeyraProxyProvider`):
+   (`VeyraAssertionProvider`), or every call goes through your backend (`VeyraProxyProvider`):
 
    ```ts
    // 2.x
@@ -1212,7 +1214,7 @@ Every rejection is a `VeyraError` with a stable `code` — never string-match me
 | `SESSION_REQUIRED` | mount `usePaySession` / `useGetPaidSession` on the payment screen |
 | `MODE_REFUSED` | the other experience's payment is mid-flight; retry after it completes |
 | `INVALID_REQUEST` | refused **before anything was sent** because an argument is invalid — e.g. a blank `merchantOrderId` on `tap.start`, `createPaymentContext` or `chargeCustomerQr`. Fix the call; there is no payment to look up |
-| `NOT_AUTHENTICATED` | the SDK could not obtain credentials, so **nothing was sent**: your provider's `assertion()` resolved `null` or rejected, or the token endpoint refused the client. With a `VeyraAuthProvider` this usually means nobody is signed in to your app — send the user to sign-in, then retry. The SDK never falls back to another connection mode (§4.2) |
+| `NOT_AUTHENTICATED` | the SDK could not obtain credentials, so **nothing was sent**: your provider's `assertion()` resolved `null` or rejected, or the token endpoint refused the client. With a `VeyraAssertionProvider` this usually means nobody is signed in to your app — send the user to sign-in, then retry. The SDK never falls back to another connection mode (§4.2) |
 | `NO_NETWORK_CONNECTION` | **the device** has no working internet connection — ask the user to connect and retry. Nothing was sent, so nothing needs undoing. Raised by every backend call in both experiences (wallet: get banks, verify account, digitise, request activation code, activate, token status; merchant: register, refresh/activate/deactivate/update merchant, create payment context, take a payment) |
 | `ONLINE_REQUIRED` | card needs the device online; grey it out, SDK self-heals |
 | `TOKEN_NOT_ACTIVE` | card blocked server-side (e.g. suspended) — not an activation prompt; `status` on the card says why (§6.3) |
@@ -1274,7 +1276,7 @@ flight), so check it **before** you read the status.
 | Native code | Reaches you as | Meaning / what to do |
 |---|---|---|
 | `NO_NETWORK_CONNECTION` | `VeyraError` code `NO_NETWORK_CONNECTION` | The device has no working internet connection; the call never left it. "Connect and try again" — nothing was charged and nothing is polling. |
-| `NOT_AUTHENTICATED` | `VeyraError` code `NOT_AUTHENTICATED` | The SDK could not obtain credentials, so the call never left the device — see §4.2. With a `VeyraAuthProvider` usually nobody is signed in. |
+| `NOT_AUTHENTICATED` | `VeyraError` code `NOT_AUTHENTICATED` | The SDK could not obtain credentials, so the call never left the device — see §4.2. With a `VeyraAssertionProvider` usually nobody is signed in. |
 | `MISSING_MANDATORY_CONFIG` | `VeyraError` code `MISSING_MANDATORY_CONFIG` | A required configuration value is absent — environment, a usable provider, terminal or merchant id. An integration bug: fix `veyra.config.ts`, or register the merchant (which supplies terminal/merchant ids). |
 | `INVALID_REQUEST` | `VeyraError` code `INVALID_REQUEST`, or tap `result.sdkErrorCode` | The request failed validation — amount not greater than zero, a missing / non-4-digit ISO 4217 currency, or a blank (or over-255-character) `merchantOrderId`. Fix the input and call again; nothing was sent. (Parameter validation the bridge catches first arrives as `VALIDATION` with `field` instead.) |
 | `PAYMENT_CANCELLED` | tap `result.sdkErrorCode` | The merchant cancelled before a card was tapped. Not an error to report — return to the amount screen. |

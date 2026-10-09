@@ -106,8 +106,7 @@ cp veyra.config.example.ts veyra.config.ts
 everything **except** the customer and the provider: the app adds `customerId` when it
 initialises (§4.1), and builds the one `provider` for both SDKs in `src/connection.ts` from the values in
 `VEYRA_CONNECTION` (§4.2). If you have a `veyra.config.ts` from an earlier checkout, copy the current shape
-from `veyra.config.example.ts` — a 2.x one still carries `clientId` / `clientSecret` in the
-SDK blocks and no longer compiles.
+from `veyra.config.example.ts`.
 
 The sample "logs in" one of two demo customers, `demo-customer-1` and `demo-customer-2`.
 Its login session lives in memory only (the sample has no storage dependency), so every
@@ -190,10 +189,6 @@ session model (§5) working. Above it, the customer bar should read *Signed in a
 demo-customer-1*.
 
 ## 4. Initialise
-
-> **Breaking change (3.0.0):** `clientId` / `clientSecret` are gone from both blocks;
-> `Veyra.initialize` takes one required `provider` instead, shared by both SDKs. See §4.2 for the
-> providers and §4.3 for the migration.
 
 > **Breaking change:** `softpos` now requires a `paymentAppProviderId` — the globally unique
 > identifier issued to your organisation at onboarding, the same value the `wallet` block
@@ -455,32 +450,6 @@ proxy provider, and why it must forward bytes unmodified.
 keep working until their provider's cut-over date; it is retired provider by provider. Don't build a
 new integration on it: a secret shipped inside an app can be extracted. Use a `VeyraAssertionProvider` or
 a `VeyraProxyProvider`.
-
-### 4.3 Migrating from 2.x to 3.0.0
-
-1. **Replace `clientId` / `clientSecret` with one `provider`**, passed to `Veyra.initialize` and
-   shared by both SDKs (§4.2). Either your backend signs an assertion for the signed-in user
-   (`VeyraAssertionProvider`), or every call goes through your backend (`VeyraProxyProvider`):
-
-   ```ts
-   // 2.x
-   await Veyra.initialize({ customerId,
-     softpos: { environment: 'TEST', clientId: ID, clientSecret: SECRET, paymentAppProviderId: P }, wallet: { … } });
-
-   // 3.0.0
-   await Veyra.initialize({ customerId,
-     provider: { providerType: 'AUTHENTICATION', clientId: ID,
-                 assertion: (audience, jkt) => myBankApi.sdkAssertion(audience, jkt) },
-     softpos: { environment: 'TEST', paymentAppProviderId: P }, wallet: { … } });
-   ```
-
-   Each kind needs one endpoint on your backend (§4.2).
-
-2. **Handle `NOT_AUTHENTICATED`** (§9) — the SDK could not obtain credentials, so nothing was sent.
-3. **Update `veyra.config.ts`** if you run this sample: copy the new `VEYRA_CONFIG` shape (no
-   credentials in it) and the `VEYRA_CONNECTION` block from `veyra.config.example.ts`, then choose the provider in
-   `appProvider()` (`src/connection.ts`).
-4. Apps still on 2.x keep working while you migrate.
 
 ## 5. Sessions — how payment screens work in React Native
 

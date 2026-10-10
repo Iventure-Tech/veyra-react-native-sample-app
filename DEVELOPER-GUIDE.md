@@ -277,7 +277,7 @@ it out; the SDK checks it against the functions your object has.
 - **An unusable provider rejects `Veyra.initialize` with `VALIDATION`, naming the problem**: no
   provider; an object with both `assertion` and the request functions; a `providerType` that
   contradicts the functions present (e.g. `'AUTHENTICATION'` with `post`/`get`/…); a blank
-  `clientId`; a missing function (e.g. `provider.patch is required (VeyraProxyProvider)`) — never
+  `clientId`; a missing function (e.g. `provider.send is required (VeyraProxyProvider)`) — never
   at the first payment. Initialising again with the other kind rejects too.
 - **A call is never sent without credentials.** When the SDK cannot obtain a token the call rejects
   with `NOT_AUTHENTICATED` and nothing is sent (§9).
@@ -295,12 +295,9 @@ const provider: VeyraAssertionProvider = {
   assertion: (audience, jkt) => myBankApi.sdkAssertion(audience, jkt), // Promise<JWT | null>
 };
 
-// …or VeyraProxyProvider: five functions, one per HTTP method, called for every backend call.
-// Each receives the complete envelope (it names the method), so one forwarder serves all five.
-const provider: VeyraProxyProvider = {
-  providerType: 'PROXY',
-  post: forward, get: forward, put: forward, delete: forward, patch: forward,
-};
+// …or VeyraProxyProvider: one function, send, called for every backend call. The envelope it
+// receives names the HTTP method.
+const provider: VeyraProxyProvider = { providerType: 'PROXY', send: forward };
 
 // Then, whichever kind:
 await Veyra.initialize({
@@ -315,6 +312,26 @@ await Veyra.initialize({
 `forward` sends the envelope to `POST {your API gateway}/issuertokengateway/v1/proxy` and resolves with
 Veyra's body unchanged; on failure it rejects with `VeyraRelayError` (the failure contract is
 below).
+
+**Proxy flow.** For the proxy provider, **deploy the Veyra Issuer Token Gateway (ITG): it supports
+proxying all SDK requests.** It obtains an access token from the Veyra token endpoint and calls the
+Veyra API for you, so you write no proxy code of your own on the server:
+
+```
+Your app ── VeyraProxyProvider.send(envelope)
+  │
+  ├─▶ Your (issuer) API gateway / authorisation server
+  │     POST /issuertokengateway/v1/proxy — checks your app's session,
+  │     removes the /issuertokengateway/v1 context
+  │
+  ├─▶ Veyra Issuer Token Gateway (ITG)          POST /proxy
+  │     ├─▶ Veyra token endpoint                 client-credentials grant (the ITG's own
+  │     │                                        credentials) → access token, cached until expiry
+  │     └─▶ Veyra API                            method + service path, query, headers, body,
+  │                                              with Authorization
+  │
+  ◀── Veyra's status and body, unchanged (or 200 PROXY_FAILED from the ITG itself)
+```
 
 This sample has no mode setting either: `appProvider()` in `src/provider.ts` returns one
 provider, and to switch you return a different one — exactly what your own app does. Its two
@@ -348,10 +365,11 @@ POST {your authorization server}/oauth2/token               (VeyraAssertionProvi
 POST {your API gateway}/issuertokengateway/v1/proxy (VeyraProxyProvider)
      body: the SDK's envelope, unchanged, for every method
   →  your gateway checks the app's session, removes the `/issuertokengateway/v1` context and
-     forwards the envelope to your issuer token gateway (ITG) as `POST /proxy`.
-     The ITG authenticates to Veyra with its own OAuth client-credentials token
-     (held server-side; an API key is not accepted), calls `service` + `path` with `method`,
-     `query`, `headers` and `body`, and answers with Veyra's status and body unchanged
+     forwards the envelope to the Veyra Issuer Token Gateway (ITG) as `POST /proxy`
+  →  the ITG gets an access token from the Veyra token endpoint with its own OAuth
+     client credentials (held server-side; an API key is not accepted), calls the
+     Veyra API (`service` + `path` with `method`, `query`, `headers` and `body`),
+     and answers with Veyra's status and body unchanged
 ```
 
 **What the assertion must contain** — a compact JWT, with the signing key held in an HSM or KMS:
@@ -419,8 +437,8 @@ proxy provider receives is one JSON string that says everything about the call:
 
 - `service` is the Veyra API the call is for: `WALLET` or `SOFTPOS`. It names the API, not your
   SDK — a wallet call to the payment API is `SOFTPOS`. Your proxy backend routes on it.
-- `method` is the HTTP method to use towards Veyra. Every function receives the complete envelope,
-  so all five post to the one endpoint.
+- `method` is the HTTP method the ITG uses towards Veyra. Because the envelope names it, the
+  provider has a single `send` and every call goes to one endpoint.
 - `path` is relative to that service — never a full URL, and without any API prefix.
 - `query` is omitted when there is none (values are decoded). `body` is absent on `GET` and `DELETE`.
 - New fields may be added under the same `version`; a breaking change bumps `version`.

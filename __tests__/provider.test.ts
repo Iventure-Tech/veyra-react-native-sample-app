@@ -154,21 +154,19 @@ describe('bankBackendRelay', () => {
       '{"version":1,"service":"SOFTPOS","method":"PATCH","path":"/merchants/M1","headers":{},"body":"{}"}';
     const { http, calls } = fakeFetch([{ status: 200, body: veyraBody }]);
     const relay = bankBackendRelay('https://bank.example', () => 'bank-session', http);
-    await expect(relay.patch(envelope)).resolves.toBe(veyraBody);
+    await expect(relay.send(envelope)).resolves.toBe(veyraBody);
     expect(calls[0].url).toBe('https://bank.example/issuertokengateway/v1/proxy');
     expect(calls[0].init.method).toBe('POST');
     expect(calls[0].init.body).toBe(envelope);
     expect((calls[0].init.headers as Record<string, string>).Authorization).toBe('Bearer bank-session');
   });
 
-  it('every method posts to the one issuer token gateway endpoint', async () => {
+  it('every call, whatever its method, posts to the one issuer token gateway endpoint', async () => {
     const { http, calls } = fakeFetch(Array.from({ length: 5 }, () => ({ status: 200, body: 'ok' })));
     const r = bankBackendRelay('https://bank.example', () => null, http);
-    await r.post('{}');
-    await r.get('{}');
-    await r.put('{}');
-    await r.delete('{}');
-    await r.patch('{}');
+    for (const m of ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']) {
+      await r.send(JSON.stringify({ version: 1, method: m }));
+    }
     expect(calls.map((c) => c.url)).toEqual(Array(5).fill('https://bank.example/issuertokengateway/v1/proxy'));
     expect(calls.map((c) => c.init.method)).toEqual(Array(5).fill('POST'));
     expect((calls[0].init.headers as Record<string, string>).Authorization).toBeUndefined();
@@ -178,13 +176,13 @@ describe('bankBackendRelay', () => {
     const proxyFailed =
       '{"response_status":"PROXY_FAILED","response_status_reason":"UPSTREAM_TIMEOUT","never_sent":false}';
     const { http } = fakeFetch([{ status: 200, body: proxyFailed }]);
-    await expect(bankBackendRelay('https://bank.example', () => 's', http).post('{}')).resolves.toBe(proxyFailed);
+    await expect(bankBackendRelay('https://bank.example', () => 's', http).send('{}')).resolves.toBe(proxyFailed);
   });
 
   it('a non-2xx was delivered: may have been sent, with its status', async () => {
     const { http } = fakeFetch([{ status: 503, body: '' }]);
     const failure = await bankBackendRelay('https://bank.example', () => 's', http)
-      .post('{}')
+      .send('{}')
       .catch((e: unknown) => e);
     expect(failure).toMatchObject({ kind: 'OTHER', neverSent: false, httpStatus: 503 });
   });
@@ -192,7 +190,7 @@ describe('bankBackendRelay', () => {
   it('a fetch failure cannot prove the request never left: neverSent stays false', async () => {
     const { http } = fakeFetch([new TypeError('Network request failed')]);
     const failure = await bankBackendRelay('https://bank.example', () => 's', http)
-      .get('{}')
+      .send('{}')
       .catch((e: unknown) => e);
     expect(failure).toMatchObject({ kind: 'OTHER', neverSent: false, httpStatus: null });
   });

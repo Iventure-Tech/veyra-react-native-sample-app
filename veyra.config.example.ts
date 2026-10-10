@@ -4,11 +4,11 @@
  * file must be treated as compromised.
  */
 import type { VeyraSoftposConfig, VeyraWalletConfig } from 'veyra-sdk-react-native';
-import type { ConnectionSettings } from './src/connection';
+import type { ProviderSettings } from './src/provider';
 
 // Everything except the customer and the provider: the app adds `customerId` (whoever it has
-// signed in) and the one `provider` for both SDKs (built in src/connection.ts from VEYRA_CONNECTION below) when it
-// calls Veyra.initialize — see src/session.tsx and src/connection.ts.
+// signed in) and the one `provider` for both SDKs (built in src/provider.ts from VEYRA_PROVIDER below) when it
+// calls Veyra.initialize — see src/session.tsx and src/provider.ts.
 export const VEYRA_CONFIG: {
   softpos: VeyraSoftposConfig;
   wallet: VeyraWalletConfig;
@@ -32,7 +32,7 @@ export const VEYRA_CONFIG: {
 /**
  * The values for the provider both SDKs use. There is no mode to set: the SDK works out how to
  * reach Veyra from the provider the app passes. Which one the sample builds is chosen in code, in
- * appProvider() in src/connection.ts. It ships with the deprecated client-secret provider so the
+ * appProvider() in src/provider.ts. It ships with the deprecated client-secret provider so the
  * sample runs with just the client id and secret from your onboarding pack — FOR TESTING ONLY.
  * Each provider reads only its own values:
  *  - assertion provider      clientId + bankBackendBaseUrl + bankClientId/bankClientSecret
@@ -40,7 +40,7 @@ export const VEYRA_CONFIG: {
  *  - proxy provider          bankBackendBaseUrl (your backend serves POST /veyra-relay/{method})
  *  - client-secret provider  DEPRECATED — clientId + clientSecret held in the app
  */
-export const VEYRA_CONNECTION: ConnectionSettings = {
+export const VEYRA_PROVIDER: ProviderSettings = {
   // OAuth client issued by Veyra. clientId: the assertion and client-secret providers.
   // clientSecret: the client-secret provider only.
   clientId: 'your-client-id',

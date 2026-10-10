@@ -150,17 +150,18 @@ describe('bankBackendAssertionProvider', () => {
 describe('bankBackendRelay', () => {
   it('forwards the envelope unchanged and returns the body unchanged', async () => {
     const veyraBody = '{"response_code":"00","weird":"ü ✓"}';
-    const envelope = '{"v":1,"path":"/paymentgateway/v1/payment","headers":{},"body":"{}"}';
+    const envelope =
+      '{"version":1,"service":"SOFTPOS","method":"PATCH","path":"/merchants/M1","headers":{},"body":"{}"}';
     const { http, calls } = fakeFetch([{ status: 200, body: veyraBody }]);
     const relay = bankBackendRelay('https://bank.example', () => 'bank-session', http);
     await expect(relay.patch(envelope)).resolves.toBe(veyraBody);
-    expect(calls[0].url).toBe('https://bank.example/veyra-relay/patch');
+    expect(calls[0].url).toBe('https://bank.example/issuertokengateway/v1');
     expect(calls[0].init.method).toBe('POST');
     expect(calls[0].init.body).toBe(envelope);
     expect((calls[0].init.headers as Record<string, string>).Authorization).toBe('Bearer bank-session');
   });
 
-  it('each method has its own route', async () => {
+  it('every method posts to the one issuer token gateway endpoint', async () => {
     const { http, calls } = fakeFetch(Array.from({ length: 5 }, () => ({ status: 200, body: 'ok' })));
     const r = bankBackendRelay('https://bank.example', () => null, http);
     await r.post('{}');
@@ -168,10 +169,16 @@ describe('bankBackendRelay', () => {
     await r.put('{}');
     await r.delete('{}');
     await r.patch('{}');
-    expect(calls.map((c) => c.url)).toEqual(
-      ['post', 'get', 'put', 'delete', 'patch'].map((m) => `https://bank.example/veyra-relay/${m}`)
-    );
+    expect(calls.map((c) => c.url)).toEqual(Array(5).fill('https://bank.example/issuertokengateway/v1'));
+    expect(calls.map((c) => c.init.method)).toEqual(Array(5).fill('POST'));
     expect((calls[0].init.headers as Record<string, string>).Authorization).toBeUndefined();
+  });
+
+  it('returns a PROXY_FAILED body unchanged for the SDK to read', async () => {
+    const proxyFailed =
+      '{"response_status":"PROXY_FAILED","response_status_reason":"UPSTREAM_TIMEOUT","never_sent":false}';
+    const { http } = fakeFetch([{ status: 200, body: proxyFailed }]);
+    await expect(bankBackendRelay('https://bank.example', () => 's', http).post('{}')).resolves.toBe(proxyFailed);
   });
 
   it('a non-2xx was delivered: may have been sent, with its status', async () => {

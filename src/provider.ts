@@ -182,10 +182,12 @@ export function parseAssertion(status: number, body: string): string | null {
 }
 
 /**
- * The proxy provider: send every SDK call through **your bank backend**. The SDK's envelope goes,
- * unchanged, as the body of `POST {base}/veyra-relay/{method}`; your backend authenticates to
- * Veyra with its own client-credentials token, forwards path/query/headers/body to the Veyra API
- * unmodified, and answers with Veyra's response body — returned here unchanged.
+ * The proxy provider: send every SDK call through **your bank**. The SDK's envelope —
+ * `{version, service, method, path, query, headers, body}` — goes, unchanged, as the body of
+ * `POST {base}/issuertokengateway/v1`, whichever of the five functions the SDK called: the
+ * envelope already names the method and the Veyra service. Your API gateway checks the app's
+ * session and forwards it to your proxy backend (your ITG), which calls Veyra and answers with
+ * Veyra's response body — returned here unchanged.
  *
  * This is called from the SDK's background work too (status polling, key refresh, credit
  * confirmations), so it must not depend on a screen being up.
@@ -195,11 +197,11 @@ export function bankBackendRelay(
   session: () => string | null,
   http: Fetch = fetch
 ): VeyraProxyProvider {
-  const forward = (method: string) => async (envelope: string): Promise<string> => {
+  const forward = async (envelope: string): Promise<string> => {
     const token = session();
     let res: Response;
     try {
-      res = await http(`${baseUrl}/veyra-relay/${method}`, {
+      res = await http(`${baseUrl}/issuertokengateway/v1`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -214,17 +216,18 @@ export function bankBackendRelay(
       throw new VeyraRelayError('OTHER', false, null, (e as Error)?.message);
     }
     const body = await res.text();
-    // Your backend relays Veyra's status: a non-2xx came back from Veyra (or your backend), so
-    // the request was delivered and may have been processed.
+    // A non-2xx came back from Veyra (or your gateway), so the request was delivered and may have
+    // been processed. Your proxy's own failures arrive as a 200 body the SDK recognises — returned
+    // unchanged like any other.
     if (res.status < 200 || res.status > 299) throw new VeyraRelayError('OTHER', false, res.status);
     return body; // Veyra's body, unmodified
   };
   return {
     providerType: 'PROXY',
-    post: forward('post'),
-    get: forward('get'),
-    put: forward('put'),
-    delete: forward('delete'),
-    patch: forward('patch'),
+    post: forward,
+    get: forward,
+    put: forward,
+    delete: forward,
+    patch: forward,
   };
 }

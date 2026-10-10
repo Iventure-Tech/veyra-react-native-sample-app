@@ -28,9 +28,8 @@ type Rail = 'idle' | 'tap' | 'mpm' | 'cpmScan' | 'cpmConfirm' | 'cpmCharging';
  * A stand-in for the till's own order/basket/invoice id, which a real integration would take
  * from its POS rather than generate here.
  *
- * Optional, never used as a lookup key, and safe to repeat across attempts of one sale — which
- * is what ties a retry back to the original order, since every attempt mints its own transaction
- * reference. The reference itself is the SDK's to mint and arrives on the outcome.
+ * Required, and unique per merchant across all its payments, whatever their outcome: the gateway
+ * refuses a reused one with `DUPLICATE_MERCHANT_ORDER_ID`, so a retry needs a new order id. The reference itself is the SDK's to mint and arrives on the outcome.
  */
 const nextSampleOrderId = (): string => `ORDER-${Date.now()}`;
 
@@ -148,7 +147,7 @@ export function GetPaidScreen({
     try {
       const { sessionId } = await merchant.tap.start({
         amountMinorUnits: minorUnits,
-        // Your own order id — optional, echoed back, never a lookup key.
+        // Your own order id — required, echoed back, unique across all of the merchant's payments.
         merchantOrderId: nextSampleOrderId(),
       });
       chargedRef.current = minorUnits;
@@ -200,7 +199,13 @@ export function GetPaidScreen({
         }
       }, 2000);
     } catch (e) {
-      Alert.alert('Cannot create QR', (e as VeyraError).message);
+      const err = e as VeyraError;
+      Alert.alert(
+        'Cannot create QR',
+        (err.code as string) === 'DUPLICATE_MERCHANT_ORDER_ID'
+          ? 'This order id is already used by another payment — start a new sale'
+          : err.message
+      );
     }
   };
 
@@ -232,8 +237,8 @@ export function GetPaidScreen({
     // the idle screen here reads as the payment having vanished.
     setRail('cpmCharging');
     try {
-      // The second argument is *your* order/basket/invoice id — optional, never used as a
-      // lookup key, and safe to repeat across attempts of one sale. The transaction reference
+      // The second argument is *your* order/basket/invoice id — required, and unique across all of
+      // the merchant's payments (a retry needs a new one). The transaction reference
       // is minted by the SDK and comes back on the outcome; never invent one.
       const outcome = await merchant.chargeCustomerQr(cpm.handle, nextSampleOrderId());
       if (outcome.approved && outcome.merchantTransactionReference) {

@@ -37,7 +37,7 @@ export const VEYRA_CONFIG: {
  * Each provider reads only its own values:
  *  - assertion provider      clientId + bankBackendBaseUrl + bankClientId/bankClientSecret
  *                            (RFC 8693 token exchange at {bankBackendBaseUrl}/oauth2/token)
- *  - proxy provider          bankBackendBaseUrl (your API gateway serves POST /issuertokengateway/v1)
+ *  - proxy provider          bankBackendBaseUrl (your API gateway serves POST /issuertokengateway/v1/proxy)
  *  - client-secret provider  DEPRECATED — clientId + clientSecret held in the app
  */
 export const VEYRA_PROVIDER: ProviderSettings = {

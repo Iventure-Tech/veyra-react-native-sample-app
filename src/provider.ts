@@ -11,7 +11,7 @@ import {
  * `veyra.config.example.ts`). There is no mode: which provider the app passes is chosen in code,
  * in {@link appProvider}, and each provider reads only its own values.
  */
-export interface ConnectionSettings {
+export interface ProviderSettings {
   /** OAuth client id issued by Veyra (the assertion and client-secret providers). */
   clientId: string;
   /** The client-secret provider only — deprecated. */
@@ -52,7 +52,7 @@ const setting = (v: string | undefined): string => {
  * your onboarding client id and secret — **for testing only**; a real app returns
  * {@link assertionProvider} or {@link proxyProvider}.
  */
-export function appProvider(settings: ConnectionSettings): VeyraProvider {
+export function appProvider(settings: ProviderSettings): VeyraProvider {
   return clientSecretProvider(settings);
   // return assertionProvider(settings);
   // return proxyProvider(settings);
@@ -62,7 +62,7 @@ export function appProvider(settings: ConnectionSettings): VeyraProvider {
  * Your Veyra client id (the only value the SDK receives), and your bank's own client at the
  * authorization server that exchanges the session for the assertion.
  */
-export function assertionProvider(settings: ConnectionSettings, http: Fetch = fetch): VeyraAssertionProvider {
+export function assertionProvider(settings: ProviderSettings, http: Fetch = fetch): VeyraAssertionProvider {
   return bankBackendAssertionProvider(
     setting(settings.clientId),
     required(settings.bankClientId, 'bankClientId'),
@@ -74,16 +74,16 @@ export function assertionProvider(settings: ConnectionSettings, http: Fetch = fe
 }
 
 /** Only the bank backend that relays the SDK's calls — no client id, no secret. */
-export function proxyProvider(settings: ConnectionSettings, http: Fetch = fetch): VeyraProxyProvider {
+export function proxyProvider(settings: ProviderSettings, http: Fetch = fetch): VeyraProxyProvider {
   return bankBackendRelay(bankBackend(settings), bankSession(settings), http);
 }
 
 /** Deprecated, testing only: just the client id and secret. */
-export function clientSecretProvider(settings: ConnectionSettings): VeyraClientSecretProvider {
+export function clientSecretProvider(settings: ProviderSettings): VeyraClientSecretProvider {
   return clientSecretCredentials(setting(settings.clientId), setting(settings.clientSecret));
 }
 
-function bankSession(settings: ConnectionSettings): () => string | null {
+function bankSession(settings: ProviderSettings): () => string | null {
   return () => setting(settings.bankSessionToken) || null;
 }
 
@@ -96,13 +96,13 @@ export function clientSecretCredentials(clientId: string, clientSecret: string):
   return { providerType: 'AUTHENTICATION', clientId, clientSecret };
 }
 
-function bankBackend(settings: ConnectionSettings): string {
+function bankBackend(settings: ProviderSettings): string {
   return required(settings.bankBackendBaseUrl, 'bankBackendBaseUrl').replace(/\/+$/, '');
 }
 
 function required(value: string | undefined, name: string): string {
   const v = setting(value);
-  if (!v) throw new Error(`VEYRA_CONNECTION.${name} must be set in veyra.config.ts for this provider`);
+  if (!v) throw new Error(`VEYRA_PROVIDER.${name} must be set in veyra.config.ts for this provider`);
   return v;
 }
 

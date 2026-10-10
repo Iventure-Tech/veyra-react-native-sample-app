@@ -99,13 +99,13 @@ on emulators or simulators.
 npm install
 cp veyra.config.example.ts veyra.config.ts
 # edit veyra.config.ts — your payment app provider id, token requestor id (and your
-# Apple Team ID for iOS), and VEYRA_CONNECTION: the values the provider needs (§4.2)
+# Apple Team ID for iOS), and VEYRA_PROVIDER: the values the provider needs (§4.2)
 ```
 
 `veyra.config.ts` is gitignored — real credentials never get committed. It holds
 everything **except** the customer and the provider: the app adds `customerId` when it
-initialises (§4.1), and builds the one `provider` for both SDKs in `src/connection.ts` from the values in
-`VEYRA_CONNECTION` (§4.2). If you have a `veyra.config.ts` from an earlier checkout, copy the current shape
+initialises (§4.1), and builds the one `provider` for both SDKs in `src/provider.ts` from the values in
+`VEYRA_PROVIDER` (§4.2). If you have a `veyra.config.ts` from an earlier checkout, copy the current shape
 from `veyra.config.example.ts`.
 
 The sample "logs in" one of two demo customers, `demo-customer-1` and `demo-customer-2`.
@@ -316,10 +316,10 @@ await Veyra.initialize({
 Veyra's body unchanged; on failure it rejects with `VeyraRelayError` (the failure contract is
 below).
 
-This sample has no mode setting either: `appProvider()` in `src/connection.ts` returns one
+This sample has no mode setting either: `appProvider()` in `src/provider.ts` returns one
 provider, and to switch you return a different one — exactly what your own app does. Its two
 backend providers, from `bankBackendAssertionProvider` and `bankBackendRelay`, are short and meant
-to be copied; each reads only its own values from `VEYRA_CONNECTION` in `veyra.config.ts` (the
+to be copied; each reads only its own values from `VEYRA_PROVIDER` in `veyra.config.ts` (the
 assertion provider: `clientId`, `bankBackendBaseUrl`, `bankClientId` and `bankClientSecret`; the
 proxy provider: `bankBackendBaseUrl`). `bankClientId`/`bankClientSecret` are **your bank's own**
 OAuth client at its authorization server, not the Veyra client: the sample uses them only to
@@ -330,7 +330,7 @@ endpoint.
 
 **Your bank's side — the two endpoints the sample calls.** `VeyraAssertionProvider` and
 `VeyraProxyProvider` each need one endpoint on **your** side. Both carry your app's **own** session
-(the sample uses a placeholder, `VEYRA_CONNECTION.bankSessionToken` — replace it with your login
+(the sample uses a placeholder, `VEYRA_PROVIDER.bankSessionToken` — replace it with your login
 session); neither is a Veyra credential. The assertion provider exchanges that session for the
 assertion with an OAuth 2.0 token exchange (RFC 8693) at your authorization server:
 

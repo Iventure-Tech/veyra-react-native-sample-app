@@ -12,8 +12,8 @@ import {
   bankBackendAssertionProvider,
   bankBackendRelay,
   parseAssertion,
-  type ConnectionSettings,
-} from '../src/connection';
+  type ProviderSettings,
+} from '../src/provider';
 
 // The wrapper's entry point starts its native bridge on import, which a unit test has none of;
 // these tests need only its real VeyraRelayError.
@@ -41,7 +41,7 @@ function fakeFetch(answers: Array<{ status: number; body: string } | Error>) {
   return { http, calls };
 }
 
-const settings = (over: Partial<ConnectionSettings> = {}): ConnectionSettings => ({
+const settings = (over: Partial<ProviderSettings> = {}): ProviderSettings => ({
   clientId: 'id',
   clientSecret: 'secret',
   bankBackendBaseUrl: 'https://bank.example/',

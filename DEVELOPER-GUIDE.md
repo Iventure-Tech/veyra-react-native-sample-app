@@ -296,10 +296,10 @@ const provider: VeyraAssertionProvider = {
 };
 
 // …or VeyraProxyProvider: five functions, one per HTTP method, called for every backend call.
+// Each receives the complete envelope (it names the method), so one forwarder serves all five.
 const provider: VeyraProxyProvider = {
   providerType: 'PROXY',
-  post: forward('post'), get: forward('get'), put: forward('put'),
-  delete: forward('delete'), patch: forward('patch'),
+  post: forward, get: forward, put: forward, delete: forward, patch: forward,
 };
 
 // Then, whichever kind:
@@ -312,7 +312,7 @@ await Veyra.initialize({
 });
 ```
 
-`forward(method)` sends the envelope to `POST {your backend}/veyra-relay/{method}` and resolves with
+`forward` sends the envelope to `POST {your API gateway}/issuertokengateway/v1` and resolves with
 Veyra's body unchanged; on failure it rejects with `VeyraRelayError` (the failure contract is
 below).
 
@@ -345,11 +345,12 @@ POST {your authorization server}/oauth2/token               (VeyraAssertionProvi
      &audience=<audience>
   →  200 {"access_token": "<compact JWT>", …}     401 when no user is signed in (resolve null)
 
-POST {your backend}/veyra-relay/{post|get|put|delete|patch} (VeyraProxyProvider)
-     body: the SDK's envelope, unchanged
-  →  your backend authenticates to Veyra with its own client-credentials token (held
-     server-side), sends path + query + headers + body to the Veyra API unmodified, and
-     answers with Veyra's status and body unchanged
+POST {your API gateway}/issuertokengateway/v1 (VeyraProxyProvider)
+     body: the SDK's envelope, unchanged, for every method
+  →  your gateway checks the app's session and forwards the envelope to your issuer token
+     gateway (ITG). The ITG authenticates to Veyra with its own OAuth client-credentials token
+     (held server-side; an API key is not accepted), calls `service` + `path` with `method`,
+     `query`, `headers` and `body`, and answers with Veyra's status and body unchanged
 ```
 
 **What the assertion must contain** — a compact JWT, with the signing key held in an HSM or KMS:
@@ -400,26 +401,33 @@ fails the call with `NOT_AUTHENTICATED` and sends nothing.
 sign:** copy it into `aud` only when it is a Veyra base URL you expect for that environment, and
 refuse anything else, so an assertion your backend signs can never be redeemed anywhere but Veyra.
 
-**What `/veyra-relay/{method}` forwards — the request envelope (version 1, public API).** Each
-`request` your proxy provider receives is one JSON string; the function called is the HTTP method your backend uses
-towards Veyra:
+**`/issuertokengateway/v1` receives the envelope (version 1, public API).** Each `request` your
+proxy provider receives is one JSON string that says everything about the call:
 
 ```json
-{
-  "v": 1,
-  "path": "/paymentgateway/v1/payment",
+{ "version": 1,
+  "service": "SOFTPOS",
+  "method": "POST",
+  "path": "/payment",
   "query": { "merchant_id": "…" },
-  "headers": { "Content-Type": "application/json", "X-Veyra-Sdk-Version": "3.0.0", "X-Veyra-Provider-Type": "PROXY" },
-  "body": "<the request JSON, as a string>"
-}
+  "headers": { "Content-Type": "application/json",
+               "X-Veyra-Sdk-Version": "3.0.0",
+               "X-Veyra-Provider-Type": "PROXY" },
+  "body": "<the request JSON, as a string>" }
 ```
 
-- `path` is relative to the Veyra API base — never a full URL; your backend decides where it
-  forwards. `query` is omitted when there is none (values are decoded). `body` is absent on `get`
-  and `delete`.
-- Forward `path`, `query`, every header and `body` to Veyra unmodified, and resolve with Veyra's
-  response body exactly as received.
-- The envelope is versioned (`v`); fields may be added under the same version.
+- `service` is the Veyra API the call is for: `WALLET` or `SOFTPOS`. It names the API, not your
+  SDK — a wallet call to the payment API is `SOFTPOS`. Your proxy backend routes on it.
+- `method` is the HTTP method to use towards Veyra. Every function receives the complete envelope,
+  so all five post to the one endpoint.
+- `path` is relative to that service — never a full URL, and without any API prefix.
+- `query` is omitted when there is none (values are decoded). `body` is absent on `GET` and `DELETE`.
+- New fields may be added under the same `version`; a breaking change bumps `version`.
+- When your proxy backend itself cannot complete a call it answers `200` with
+  `{"response_status": "PROXY_FAILED", "response_status_reason": "…", "never_sent": true|false}`.
+  Return that body unchanged like any other: the SDK recognises it.
+- Your proxy backend forwards `query`, every header and `body` to Veyra unmodified; resolve with
+  Veyra's response body exactly as received.
 
 **The proxy provider's failure contract — say whether the request was sent.** Reject with a
 `VeyraRelayError(kind, neverSent, httpStatus?)` (exported by `veyra-sdk-react-native`):

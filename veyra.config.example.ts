@@ -37,7 +37,8 @@ export const VEYRA_CONFIG: {
  * Each provider reads only its own values:
  *  - assertion provider      clientId + bankBackendBaseUrl + bankClientId/bankClientSecret
  *                            (RFC 8693 token exchange at {bankBackendBaseUrl}/oauth2/token)
- *  - proxy provider          bankBackendBaseUrl (your API gateway serves POST /issuertokengateway/v1/proxy)
+ *  - proxy provider          bankBackendBaseUrl + bankClientId/bankClientSecret + username/password
+ *                            (your API gateway serves POST /issuertokengateway/v1/proxy)
  *  - client-secret provider  DEPRECATED — clientId + clientSecret held in the app
  */
 export const VEYRA_PROVIDER: ProviderSettings = {
@@ -52,10 +53,12 @@ export const VEYRA_PROVIDER: ProviderSettings = {
   // (HTTP Basic).
   bankClientId: 'your-bank-client-id',
   bankClientSecret: 'your-bank-client-secret',
-  // PLACEHOLDER for your bank app's own logged-in session, sent to your bank backend as
-  // "Authorization: Bearer <token>"; empty means nobody is signed in. A real app uses its own
-  // login session here. This is not a Veyra credential.
-  bankSessionToken: 'sample-bank-session',
+  // The demo user's bank login. The app logs in with them (password grant at
+  // {bankBackendBaseUrl}/oauth2/token, the bank client above as HTTP Basic) to get the bank
+  // session both bank providers use. Empty means nobody is signed in. A real app takes them from
+  // its login screen and never stores the password. Not Veyra credentials.
+  username: '',
+  password: '',
 };
 
 /** Test prefill for the add-card and register-merchant forms (from your onboarding pack). */

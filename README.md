@@ -95,12 +95,16 @@ in `src/provider.ts` returns it — and switching is returning a different one:
 
 | `appProvider()` returns | Provider | What it needs (`VEYRA_PROVIDER`) | Your bank backend serves |
 |---|---|---|---|
-| `assertionProvider(…)` (recommended) | `VeyraAssertionProvider` | `clientId` (the only value the SDK receives), plus `bankBackendBaseUrl`, `bankClientId`, `bankClientSecret` for your bank's own client | `POST /oauth2/token` — an RFC 8693 token exchange of the user's session for the assertion → `{"access_token": "<JWT>"}` (401 when nobody is signed in) |
-| `proxyProvider(…)` | `VeyraProxyProvider` | `bankBackendBaseUrl` | `POST /issuertokengateway/v1/proxy` for every method — your API gateway removes the `/issuertokengateway/v1` context and forwards the SDK's envelope to your issuer token gateway's `/proxy`, which calls Veyra and answers with Veyra's body |
+| `assertionProvider(…)` (recommended) | `VeyraAssertionProvider` | `clientId` (the only value the SDK receives), plus `bankBackendBaseUrl`, `bankClientId`, `bankClientSecret` for your bank's own client, and `username`/`password` | `POST /oauth2/token` — an RFC 8693 token exchange of the user's session for the assertion → `{"access_token": "<JWT>"}` (401 when nobody is signed in) |
+| `proxyProvider(…)` | `VeyraProxyProvider` | `bankBackendBaseUrl`, `bankClientId`, `bankClientSecret`, `username`, `password` | `POST /issuertokengateway/v1/proxy` for every method — your API gateway removes the `/issuertokengateway/v1` context and forwards the SDK's envelope to your issuer token gateway's `/proxy`, which calls Veyra and answers with Veyra's body |
 | `clientSecretProvider(…)` (**deprecated**, what the sample ships with) | `VeyraClientSecretProvider` | `clientId`, `clientSecret` | nothing — the secret sits in the app, which is why this provider is being retired |
 
-`bankSessionToken` is a **placeholder** for your app's own login session, sent to your bank
-backend as a bearer token. The two providers that call your backend are in `src/provider.ts` —
+**The bank session.** Both providers that call your bank first log the user in —
+`POST {bankBackendBaseUrl}/oauth2/token` with your bank's client as HTTP Basic and
+`grant_type=password`, `username`, `password` — and use the access token as the bank session (cached
+until it expires): the assertion provider exchanges it for the assertion, the proxy provider sends it
+as `Authorization: Bearer`. For now the sample reads `username`/`password` from `veyra.config.ts`; a
+real app takes them from its login screen and never stores the password. The two providers that call your backend are in `src/provider.ts` —
 short, and meant to be copied. The proxy provider is called from the SDK's background work too, not only
 from screens. The full contract — the assertion's claims, the request envelope, and how a proxy
 provider reports a failure — is in [§4.2 of the Developer Guide](DEVELOPER-GUIDE.md#42-connect-to-veyra--choosing-a-provider).

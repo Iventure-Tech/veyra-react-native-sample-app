@@ -345,6 +345,15 @@ The sample ships returning `clientSecretCredentials` — a `VeyraClientSecretPro
 only** that needs just `clientId` and `clientSecret` — so it runs before your backend has either
 endpoint.
 
+> **Signing the user in to your bank is your app's responsibility, not the SDK's.** The SDK never
+> authenticates with your bank or its backend. It doesn't collect credentials, it doesn't obtain,
+> refresh or end a bank session, and it doesn't call your login or token endpoints. It only asks your
+> provider for what it needs: an assertion (`VeyraAssertionProvider`), or to send a request
+> (`VeyraProxyProvider`). Your provider gets those using the session your app already holds. How the
+> user signs in (password, biometrics, single sign-on, multi-factor), and how that session is stored,
+> refreshed and revoked, is your app's own design. The sample's password-grant login, with credentials
+> read from local config, is a demo stand-in only — not a pattern to ship.
+
 **Your bank's side — the two endpoints the sample calls.** `VeyraAssertionProvider` and
 `VeyraProxyProvider` each need one endpoint on **your** side. Both carry your app's **own** session
 (the sample logs in with `VEYRA_PROVIDER.username`/`password` — a password grant at

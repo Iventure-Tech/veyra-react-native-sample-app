@@ -12,7 +12,7 @@ import { appProvider } from './provider';
  * starts signed in as the first demo customer. A real app restores its own login here and
  * initialises the SDK with that customer (or not at all while nobody is signed in).
  */
-export const DEMO_CUSTOMERS = ['demo-customer-1', 'demo-customer-2'] as const;
+export const DEMO_CUSTOMERS = ['test-user@iventure.tech', 'demo-customer-2'] as const;
 
 export interface DemoSession {
   /** The customer the app has logged in (the last one, while signed out). */

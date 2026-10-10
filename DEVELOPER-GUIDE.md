@@ -108,9 +108,9 @@ initialises (§4.1), and builds the one `provider` for both SDKs in `src/provide
 `VEYRA_PROVIDER` (§4.2). If you have a `veyra.config.ts` from an earlier checkout, copy the current shape
 from `veyra.config.example.ts`.
 
-The sample "logs in" one of two demo customers, `demo-customer-1` and `demo-customer-2`.
+The sample "logs in" one of two demo customers, `test-user@iventure.tech` and `demo-customer-2`.
 Its login session lives in memory only (the sample has no storage dependency), so every
-launch starts signed in as `demo-customer-1`; Home's customer bar switches between them
+launch starts signed in as `test-user@iventure.tech`; Home's customer bar switches between them
 and signs out.
 
 ### Android
@@ -186,7 +186,7 @@ and signs out.
 **First sanity check:** the Home screen's *NFC mode* readout should say `NONE`, and flip
 to `WALLET` / `SOFTPOS` only while the Pay / Get-paid screens are focused — that is the
 session model (§5) working. Above it, the customer bar should read *Signed in as
-demo-customer-1*.
+test-user@iventure.tech*.
 
 ## 4. Initialise
 
@@ -338,12 +338,14 @@ provider, and to switch you return a different one — exactly what your own app
 backend providers, from `bankBackendAssertionProvider` and `bankBackendRelay`, are short and meant
 to be copied; each reads only its own values from `VEYRA_PROVIDER` in `veyra.config.ts` (the
 assertion provider: `clientId`, `bankBackendBaseUrl`, `bankClientId` and `bankClientSecret`; the
-proxy provider: `bankBackendBaseUrl`). `bankClientId`/`bankClientSecret` are **your bank's own**
-OAuth client at its authorization server, not the Veyra client: the sample uses them only to
-authenticate the token exchange and never passes them to the SDK.
-The sample ships returning `clientSecretCredentials` — a `VeyraClientSecretProvider` **for testing
-only** that needs just `clientId` and `clientSecret` — so it runs before your backend has either
-endpoint.
+proxy provider: `bankBackendBaseUrl`, `bankClientId` and `bankClientSecret`; both also log the user
+in with `username`/`password`). `bankClientId`/`bankClientSecret` are **your bank's own** OAuth
+client at its authorization server, not the Veyra client: the sample uses them only to log the user
+in and for the token exchange, and never passes them to the SDK.
+The sample ships returning the proxy provider (`bankBackendRelay`), so the app holds no Veyra
+secret. The deprecated `clientSecretCredentials` — a `VeyraClientSecretProvider` **for testing
+only** that needs just `clientId` and `clientSecret` — is still there for testing before your
+backend has either endpoint.
 
 > **Signing the user in to your bank is your app's responsibility, not the SDK's.** The SDK never
 > authenticates with your bank or its backend. It doesn't collect credentials, it doesn't obtain,

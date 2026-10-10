@@ -54,10 +54,15 @@ const settings = (over: Partial<ProviderSettings> = {}): ProviderSettings => ({
 });
 
 describe('appProvider', () => {
-  it('has no mode: the sample ships the testing-only client-secret provider', () => {
-    const p = appProvider(settings()) as { providerType: string; clientId: string; clientSecret: string };
-    expect(p.providerType).toBe('AUTHENTICATION');
-    expect(p.clientSecret).toBe('secret');
+  it('has no mode: the sample ships the proxy provider', () => {
+    const p = appProvider(settings()) as { providerType: string; clientId?: string; clientSecret?: string };
+    expect(p.providerType).toBe('PROXY');
+    expect(p.clientId).toBeUndefined();
+    expect(p.clientSecret).toBeUndefined();
+  });
+
+  it('refuses without the bank backend, naming it', () => {
+    expect(() => appProvider(settings({ bankBackendBaseUrl: '' }))).toThrow(/bankBackendBaseUrl/);
   });
 });
 

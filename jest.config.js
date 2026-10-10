@@ -1,7 +1,9 @@
 module.exports = {
   preset: 'react-native',
-  // The Veyra wrapper ships TypeScript sources: transform it like the react-native packages.
+  setupFiles: ['<rootDir>/jest.setup.js'],
+  // The Veyra wrapper ships TypeScript sources, and react-navigation ships image assets: transform
+  // both like the react-native packages (an untransformed .png is parsed as JavaScript).
   transformIgnorePatterns: [
-    'node_modules/(?!((jest-)?react-native|@react-native(-community)?|veyra-sdk-react-native)/)',
+    'node_modules/(?!((jest-)?react-native[^/]*|@react-native(-community)?|@react-navigation|veyra-sdk-react-native)/)',
   ],
 };

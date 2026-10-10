@@ -97,7 +97,7 @@ export function PayScreen({
   // `requireOnline`, and can never fix `amountExceedCardLimit`, whose cap is provisioned with the
   // card. Telling the payer to go online for the second sends them round a loop that cannot work.
   useEffect(() => {
-    const tur = cards.find((c) => c.id === activeId)?.tokenUniqueReference;
+    const tur = cards?.find((c) => c.id === activeId)?.tokenUniqueReference;
     if (!tur) return;
     const sub = wallet.onPaymentRefusal(tur, (refusal) => {
       if (refusal.type === 'requireOnline') {

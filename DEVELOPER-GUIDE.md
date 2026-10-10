@@ -870,11 +870,11 @@ taps toward your launcher activity and away from the session.
 > **The transaction reference is minted by the SDK, not by your app.** It comes back on the
 > outcome as `merchantTransactionReference` (`{terminalId}-YYYYMMDDHHmmssSSS`) and is the key for
 > receipts, `refreshTransactionStatus` and credit confirmation. `merchantOrderId` is the field for
-> **your** order / basket / invoice id: echoed back, and **unique per merchant** among approved and
-> still-pending payments. A payment that reuses one is refused `94` / `FAILED` /
-> `DUPLICATE_MERCHANT_ORDER_ID`, and `createPaymentContext` rejects with `DUPLICATE_MERCHANT_ORDER_ID`,
-> before anything is sent. A declined or failed payment releases its order id, so its retry may
-> reuse it, and several QRs may share one. **Every merchant-initiated rail requires it**: `tap.start`
+> **your** order / basket / invoice id: echoed back, and **unique per merchant** across all its
+> payments, whatever their outcome. A payment that reuses one — even one used by a declined or
+> failed payment — is refused `94` / `FAILED` / `DUPLICATE_MERCHANT_ORDER_ID`, and
+> `createPaymentContext` rejects with `DUPLICATE_MERCHANT_ORDER_ID`, before anything is sent. A
+> retry needs a new order id; several QRs may share one until one of them is paid. **Every merchant-initiated rail requires it**: `tap.start`
 > (`TapRequest.merchantOrderId`), `createPaymentContext(amountMinorUnits, currency | undefined, merchantOrderId)`
 > (pass `undefined` to keep the default currency) and `chargeCustomerQr(handle, merchantOrderId)`.
 > The types make it mandatory; a blank (or over-255-character) value rejects with
@@ -1222,7 +1222,7 @@ Every rejection is a `VeyraError` with a stable `code` — never string-match me
 | `SESSION_REQUIRED` | mount `usePaySession` / `useGetPaidSession` on the payment screen |
 | `MODE_REFUSED` | the other experience's payment is mid-flight; retry after it completes |
 | `INVALID_REQUEST` | refused **before anything was sent** because an argument is invalid — e.g. a blank `merchantOrderId` on `tap.start`, `createPaymentContext` or `chargeCustomerQr`. Fix the call; there is no payment to look up |
-| `DUPLICATE_MERCHANT_ORDER_ID` | `createPaymentContext` only: another approved or still-pending payment of this merchant already uses the `merchantOrderId`, so no QR was created. Create it with a different order id; several QRs may share one, and a declined or failed payment's order id may be reused |
+| `DUPLICATE_MERCHANT_ORDER_ID` | `createPaymentContext` only: another payment of this merchant already uses the `merchantOrderId`, whatever its outcome, so no QR was created. Create it with a different order id; several QRs may share one until one of them is paid |
 | `NOT_AUTHENTICATED` | the SDK could not obtain credentials, so **nothing was sent**: your provider's `assertion()` resolved `null` or rejected, or the token endpoint refused the client. With a `VeyraAssertionProvider` this usually means nobody is signed in to your app — send the user to sign-in, then retry. The SDK never falls back to another connection mode (§4.2) |
 | `NO_NETWORK_CONNECTION` | **the device** has no working internet connection — ask the user to connect and retry. Nothing was sent, so nothing needs undoing. Raised by every backend call in both experiences (wallet: get banks, verify account, digitise, request activation code, activate, token status; merchant: register, refresh/activate/deactivate/update merchant, create payment context, take a payment) |
 | `ONLINE_REQUIRED` | card needs the device online; grey it out, SDK self-heals |
@@ -1385,7 +1385,7 @@ every status poll. One code, one reason, one status:
 | `'96'` | `SYSTEM_MALFUNCTION` | `PENDING` | A service threw while processing; the outcome is ambiguous | Same as `68`. It may yet settle — never report it as a decline. |
 | `'91'` | `ISSUER_SWITCH_NOT_AVAILABLE` | `FAILED` | The connection never opened — provably nothing was sent | Safe to retry. The merchant's own connection is not the problem. |
 | `'25'` | `UNABLE_TO_LOCATE_RECORD` | `FAILED` | The gateway has no such transaction — it never arrived | Terminal and safe: the payment did not happen. Take it again. |
-| `'94'` | `DUPLICATE_MERCHANT_ORDER_ID` | `FAILED` | Another approved or still-pending payment of this merchant already uses the `merchantOrderId` | Nothing was sent. Take the payment with a different order id. |
+| `'94'` | `DUPLICATE_MERCHANT_ORDER_ID` | `FAILED` | Another payment of this merchant already uses the `merchantOrderId` — approved, pending, declined or failed | Nothing was sent. Take the payment with a different order id. |
 | `'07'` | `ACCOUNT_VALIDATION_FAILED` | `FAILED` | The destination (settlement) account was refused by the bank's own validation | Nothing was transferred. Fix the settlement account on the merchant profile. |
 | `'21'` | `NAME_ENQUIRY_FAILED` | `FAILED` | The pre-transfer name enquiry itself failed, so the transfer was never dispatched | Nothing was transferred — retry; if it persists, check the settlement account details. |
 

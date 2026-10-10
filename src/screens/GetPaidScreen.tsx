@@ -28,9 +28,8 @@ type Rail = 'idle' | 'tap' | 'mpm' | 'cpmScan' | 'cpmConfirm' | 'cpmCharging';
  * A stand-in for the till's own order/basket/invoice id, which a real integration would take
  * from its POS rather than generate here.
  *
- * Required, and unique per merchant among approved and unresolved payments: the gateway refuses a
- * reused one with `DUPLICATE_MERCHANT_ORDER_ID`. A declined or failed sale's order id may be reused
- * for its retry. The reference itself is the SDK's to mint and arrives on the outcome.
+ * Required, and unique per merchant across all its payments, whatever their outcome: the gateway
+ * refuses a reused one with `DUPLICATE_MERCHANT_ORDER_ID`, so a retry needs a new order id. The reference itself is the SDK's to mint and arrives on the outcome.
  */
 const nextSampleOrderId = (): string => `ORDER-${Date.now()}`;
 
@@ -148,7 +147,7 @@ export function GetPaidScreen({
     try {
       const { sessionId } = await merchant.tap.start({
         amountMinorUnits: minorUnits,
-        // Your own order id — required, echoed back, unique among approved and pending payments.
+        // Your own order id — required, echoed back, unique across all of the merchant's payments.
         merchantOrderId: nextSampleOrderId(),
       });
       chargedRef.current = minorUnits;
@@ -238,8 +237,8 @@ export function GetPaidScreen({
     // the idle screen here reads as the payment having vanished.
     setRail('cpmCharging');
     try {
-      // The second argument is *your* order/basket/invoice id — required, and unique among
-      // approved and pending payments (a declined sale's retry may reuse it). The transaction reference
+      // The second argument is *your* order/basket/invoice id — required, and unique across all of
+      // the merchant's payments (a retry needs a new one). The transaction reference
       // is minted by the SDK and comes back on the outcome; never invent one.
       const outcome = await merchant.chargeCustomerQr(cpm.handle, nextSampleOrderId());
       if (outcome.approved && outcome.merchantTransactionReference) {

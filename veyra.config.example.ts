@@ -35,7 +35,8 @@ export const VEYRA_CONFIG: {
  * appProvider() in src/connection.ts. It ships with the deprecated client-secret provider so the
  * sample runs with just the client id and secret from your onboarding pack — FOR TESTING ONLY.
  * Each provider reads only its own values:
- *  - assertion provider      clientId + bankBackendBaseUrl (your backend serves POST /sdk-assertion)
+ *  - assertion provider      clientId + bankBackendBaseUrl + bankClientId/bankClientSecret
+ *                            (RFC 8693 token exchange at {bankBackendBaseUrl}/oauth2/token)
  *  - proxy provider          bankBackendBaseUrl (your backend serves POST /veyra-relay/{method})
  *  - client-secret provider  DEPRECATED — clientId + clientSecret held in the app
  */
@@ -46,6 +47,11 @@ export const VEYRA_CONNECTION: ConnectionSettings = {
   clientSecret: 'your-client-secret',
   // Your bank backend (the assertion and proxy providers), e.g. 'https://bank-backend.example'.
   bankBackendBaseUrl: '',
+  // Your bank's own OAuth client at its authorization server — NOT the Veyra client above, and
+  // never passed to the SDK. The assertion provider authenticates the token exchange with it
+  // (HTTP Basic).
+  bankClientId: 'your-bank-client-id',
+  bankClientSecret: 'your-bank-client-secret',
   // PLACEHOLDER for your bank app's own logged-in session, sent to your bank backend as
   // "Authorization: Bearer <token>"; empty means nobody is signed in. A real app uses its own
   // login session here. This is not a Veyra credential.

@@ -782,8 +782,8 @@ const updated = await wallet.refreshCreditConfirmation(tx.transactionHash);
 
 ### 7.1 Registration & profile
 
-`merchant.register({ merchantType: 'PERSONAL' | 'BUSINESS', … })` (BVN required for
-personal and optional for business — the account holder behind a business has one too;
+`merchant.register({ merchantType: 'PERSONAL' | 'BUSINESS', … })` (BVN optional for
+both types — send it when you have it;
 CAC number for business; optional `walletAccountId`, stored verbatim by the gateway),
 `getSettlementBanks()`, `isRegistered()`, `getStored()`, `refreshStatus()`,
 `activate()` / `deactivate()`, `update(…)` (also accepts optional `walletAccountId` and

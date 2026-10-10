@@ -51,14 +51,14 @@ const setting = (v: string | undefined): string => {
  * works out how to reach Veyra from the kind of provider it is given, so switching is returning a
  * different one here.
  *
- * Return ONE of the three. The sample ships with the client-secret provider so it runs with just
- * your onboarding client id and secret — **for testing only**; a real app returns
- * {@link assertionProvider} or {@link proxyProvider}.
+ * Return ONE of the three. The sample ships with {@link proxyProvider}: every SDK call goes through
+ * your bank backend, so the app holds no Veyra secret. {@link assertionProvider} is the other
+ * production choice; the deprecated {@link clientSecretProvider} is for testing only.
  */
 export function appProvider(settings: ProviderSettings): VeyraProvider {
-  return clientSecretProvider(settings);
+  return proxyProvider(settings);
   // return assertionProvider(settings);
-  // return proxyProvider(settings);
+  // return clientSecretProvider(settings);
 }
 
 /**

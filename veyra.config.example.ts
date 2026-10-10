@@ -32,14 +32,14 @@ export const VEYRA_CONFIG: {
 /**
  * The values for the provider both SDKs use. There is no mode to set: the SDK works out how to
  * reach Veyra from the provider the app passes. Which one the sample builds is chosen in code, in
- * appProvider() in src/provider.ts. It ships with the deprecated client-secret provider so the
- * sample runs with just the client id and secret from your onboarding pack — FOR TESTING ONLY.
- * Each provider reads only its own values:
+ * appProvider() in src/provider.ts. It ships with the proxy provider (every SDK call goes through
+ * your bank backend, so the app holds no Veyra secret); the deprecated client-secret provider is
+ * there for testing only. Each provider reads only its own values:
  *  - assertion provider      clientId + bankBackendBaseUrl + bankClientId/bankClientSecret
  *                            (RFC 8693 token exchange at {bankBackendBaseUrl}/oauth2/token)
  *  - proxy provider          bankBackendBaseUrl + bankClientId/bankClientSecret + username/password
  *                            (your API gateway serves POST /issuertokengateway/v1/proxy)
- *  - client-secret provider  DEPRECATED — clientId + clientSecret held in the app
+ *  - client-secret provider  DEPRECATED, testing only — clientId + clientSecret held in the app
  */
 export const VEYRA_PROVIDER: ProviderSettings = {
   // OAuth client issued by Veyra. clientId: the assertion and client-secret providers.
@@ -65,12 +65,12 @@ export const VEYRA_PROVIDER: ProviderSettings = {
 export const SAMPLE_ACCOUNT = {
   accountNumber: '0123456789',
   institutionCode: '000013',
-  accountHolderName: 'Test Person',
-  bvn: '22222222222',
+  accountHolderName: 'Test User',
+  bvn: '1234567890',
   mobileNumber: '+2348000000000',
   // Also sent as the wallet account id. The SDK hashes it and the issuer compares that hash
   // against the email/phone registered on the account, so use the account's registered email.
-  emailAddress: 'test@example.com',
+  emailAddress: 'test-user@iventure.tech',
   accountHolderAddress: '1 Test Street, Lagos',
   addressLine1: '20 Campbell Street',
   city: 'Lagos',

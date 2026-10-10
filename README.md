@@ -95,7 +95,7 @@ in `src/connection.ts` returns it — and switching is returning a different one
 
 | `appProvider()` returns | Provider | What it needs (`VEYRA_CONNECTION`) | Your bank backend serves |
 |---|---|---|---|
-| `assertionProvider(…)` (recommended) | `VeyraAssertionProvider` | `clientId`, `bankBackendBaseUrl` | `POST /sdk-assertion` `{"audience": …, "jkt": …}` → `{"assertion": "<JWT>"}` (401 when nobody is signed in) |
+| `assertionProvider(…)` (recommended) | `VeyraAssertionProvider` | `clientId` (the only value the SDK receives), plus `bankBackendBaseUrl`, `bankClientId`, `bankClientSecret` for your bank's own client | `POST /oauth2/token` — an RFC 8693 token exchange of the user's session for the assertion → `{"access_token": "<JWT>"}` (401 when nobody is signed in) |
 | `proxyProvider(…)` | `VeyraProxyProvider` | `bankBackendBaseUrl` | `POST /veyra-relay/{post\|get\|put\|delete\|patch}` — forwards the SDK's envelope to Veyra unmodified and answers with Veyra's body |
 | `clientSecretProvider(…)` (**deprecated**, what the sample ships with) | `VeyraClientSecretProvider` | `clientId`, `clientSecret` | nothing — the secret sits in the app, which is why this provider is being retired |
 

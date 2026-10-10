@@ -16,8 +16,18 @@ export interface ConnectionSettings {
   clientId: string;
   /** The client-secret provider only — deprecated. */
   clientSecret: string;
-  /** Your bank backend (the assertion and proxy providers), e.g. https://bank-backend.example */
+  /**
+   * Your bank's authorization server (the assertion provider's token exchange) or bank backend
+   * (the proxy provider), e.g. https://bank-backend.example
+   */
   bankBackendBaseUrl: string;
+  /**
+   * Your bank's own OAuth client at its authorization server — NOT the Veyra client above, and
+   * never passed to the SDK. The assertion provider authenticates the token exchange with it.
+   */
+  bankClientId: string;
+  /** The secret of {@link bankClientId}. A secret in an app can be extracted. */
+  bankClientSecret: string;
   /**
    * PLACEHOLDER for your bank app's own logged-in session, sent to your bank backend as a bearer
    * token; empty means nobody is signed in. Not a Veyra credential.
@@ -48,9 +58,19 @@ export function appProvider(settings: ConnectionSettings): VeyraProvider {
   // return proxyProvider(settings);
 }
 
-/** Your client id, and the bank backend that signs the assertion. */
+/**
+ * Your Veyra client id (the only value the SDK receives), and your bank's own client at the
+ * authorization server that exchanges the session for the assertion.
+ */
 export function assertionProvider(settings: ConnectionSettings, http: Fetch = fetch): VeyraAssertionProvider {
-  return bankBackendAssertionProvider(setting(settings.clientId), bankBackend(settings), bankSession(settings), http);
+  return bankBackendAssertionProvider(
+    setting(settings.clientId),
+    required(settings.bankClientId, 'bankClientId'),
+    required(settings.bankClientSecret, 'bankClientSecret'),
+    bankBackend(settings),
+    bankSession(settings),
+    http
+  );
 }
 
 /** Only the bank backend that relays the SDK's calls — no client id, no secret. */
@@ -77,57 +97,88 @@ export function clientSecretCredentials(clientId: string, clientSecret: string):
 }
 
 function bankBackend(settings: ConnectionSettings): string {
-  const base = setting(settings.bankBackendBaseUrl).replace(/\/+$/, '');
-  if (!base) throw new Error('VEYRA_CONNECTION.bankBackendBaseUrl must be set in veyra.config.ts for this provider');
-  return base;
+  return required(settings.bankBackendBaseUrl, 'bankBackendBaseUrl').replace(/\/+$/, '');
 }
 
+function required(value: string | undefined, name: string): string {
+  const v = setting(value);
+  if (!v) throw new Error(`VEYRA_CONNECTION.${name} must be set in veyra.config.ts for this provider`);
+  return v;
+}
+
+export const GRANT_TOKEN_EXCHANGE = 'urn:ietf:params:oauth:grant-type:token-exchange';
+export const TOKEN_TYPE_ACCESS_TOKEN = 'urn:ietf:params:oauth:token-type:access_token';
+export const TOKEN_TYPE_JWT = 'urn:ietf:params:oauth:token-type:jwt';
+
 /**
- * The assertion provider: fetch a short-lived assertion for the signed-in user from **your bank
- * backend's endpoint** (`POST {base}/sdk-assertion`). Your backend signs a JWT with at least `iss`,
- * `sub`, `aud` equal to the `audience` the SDK passes here, `iat`, `exp` ≤ 5 min and a unique `jti`;
- * `cnf.jkt` (the `jkt` the SDK passes here) and `acr` are optional. Request `{"audience": …, "jkt": …}` with your
- * app's session; response `{"assertion": "<compact JWT>"}`.
+ * The assertion provider: exchange the signed-in user's bank session for a short-lived assertion
+ * with a **token exchange at your authorization server** (RFC 8693, `POST {base}/oauth2/token`).
+ * The assertion carries at least `iss`, `sub`, `aud` equal to the `audience` the SDK passes here,
+ * `iat`, `exp` ≤ 5 min and a unique `jti`; `cnf.jkt` and `acr` are optional.
+ *
+ * Request (form-encoded, your bank's client authenticated with HTTP Basic
+ * `bankClientId:bankClientSecret`): `grant_type=urn:ietf:params:oauth:grant-type:token-exchange`,
+ * `subject_token=<bank session>`, `subject_token_type=…:token-type:access_token`,
+ * `requested_token_type=…:token-type:jwt`, `audience=<Veyra API base URL>`. Response:
+ * `{"access_token": "<compact JWT>", …}`.
  * Resolves null when no user is signed in (no session, or 401) — the SDK then fails the call with
  * NOT_AUTHENTICATED and sends nothing; any other failure rejects, with the same effect.
  */
 export function bankBackendAssertionProvider(
   clientId: string,
+  bankClientId: string,
+  bankClientSecret: string,
   baseUrl: string,
   session: () => string | null,
   http: Fetch = fetch
 ): VeyraAssertionProvider {
   return {
     providerType: 'AUTHENTICATION',
-    clientId, // the OAuth client id Veyra issued to this app (public, not a secret)
-    assertion: async (audience, jkt) => {
-      const token = session();
-      if (!token) return null; // logged out
-      const res = await http(`${baseUrl}/sdk-assertion`, {
+    clientId, // the OAuth client id Veyra issued to this app (public, not a secret) — the SDK's only credential
+    assertion: async (audience) => {
+      const subjectToken = session();
+      if (!subjectToken) return null; // logged out
+      const res = await http(`${baseUrl}/oauth2/token`, {
         method: 'POST',
-        // Your bank session, not a Veyra credential.
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ audience, jkt }),
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          // Your bank's client at its authorization server — never given to the SDK.
+          Authorization: `Basic ${btoa(`${bankClientId}:${bankClientSecret}`)}`,
+        },
+        body: formEncode({
+          grant_type: GRANT_TOKEN_EXCHANGE,
+          subject_token: subjectToken,
+          subject_token_type: TOKEN_TYPE_ACCESS_TOKEN,
+          requested_token_type: TOKEN_TYPE_JWT,
+          audience,
+        }),
       });
       return parseAssertion(res.status, await res.text());
     },
   };
 }
 
-/** The assertion from your backend's answer: null on 401 (no session), throws otherwise. */
+/** `application/x-www-form-urlencoded`, without relying on React Native's partial URLSearchParams. */
+function formEncode(fields: Record<string, string>): string {
+  return Object.entries(fields)
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .join('&');
+}
+
+/** The exchanged token from the server's answer: null on 401 (no session), throws otherwise. */
 export function parseAssertion(status: number, body: string): string | null {
   if (status === 401) return null;
-  if (status < 200 || status > 299) throw new Error(`sdk-assertion answered HTTP ${status}`);
-  let assertion: unknown;
+  if (status < 200 || status > 299) throw new Error(`token exchange answered HTTP ${status}: ${body}`);
+  let accessToken: unknown;
   try {
-    assertion = JSON.parse(body)?.assertion;
+    accessToken = JSON.parse(body)?.access_token;
   } catch {
-    assertion = undefined;
+    accessToken = undefined;
   }
-  if (typeof assertion !== 'string' || assertion === '') {
-    throw new Error('sdk-assertion answered without an assertion');
+  if (typeof accessToken !== 'string' || accessToken === '') {
+    throw new Error('token exchange answered without an access_token');
   }
-  return assertion;
+  return accessToken;
 }
 
 /**

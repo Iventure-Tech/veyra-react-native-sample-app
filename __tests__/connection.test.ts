@@ -45,6 +45,8 @@ const settings = (over: Partial<ConnectionSettings> = {}): ConnectionSettings =>
   clientId: 'id',
   clientSecret: 'secret',
   bankBackendBaseUrl: 'https://bank.example/',
+  bankClientId: 'bank-id',
+  bankClientSecret: 'bank-secret',
   bankSessionToken: 'bank-session',
   ...over,
 });
@@ -58,11 +60,18 @@ describe('appProvider', () => {
 });
 
 describe('each provider reads only its own values', () => {
-  it('the assertion provider carries the client id', () => {
+  it('the assertion provider carries only the Veyra client id', () => {
     const auth = assertionProvider(settings());
     expect(auth.providerType).toBe('AUTHENTICATION');
     expect(typeof auth.assertion).toBe('function');
     expect(auth.clientId).toBe('id');
+    expect(Object.keys(auth).sort()).toEqual(['assertion', 'clientId', 'providerType']);
+  });
+
+  it('the assertion provider needs the bank client', () => {
+    expect(() => assertionProvider(settings({ bankClientId: '' }))).toThrow(/bankClientId/);
+    expect(() => assertionProvider(settings({ bankClientSecret: ' ' }))).toThrow(/bankClientSecret/);
+    expect(() => assertionProvider(settings({ bankClientId: 'your-bank-client-id' }))).toThrow(/bankClientId/);
   });
 
   it('the proxy provider needs no client id or secret', () => {
@@ -89,30 +98,51 @@ describe('each provider reads only its own values', () => {
 });
 
 describe('bankBackendAssertionProvider', () => {
-  it('posts the thumbprint and audience with the bank session and returns the assertion', async () => {
-    const { http, calls } = fakeFetch([{ status: 200, body: '{"assertion":"eyJ.a.b"}' }]);
-    const provider = bankBackendAssertionProvider('client-id', 'https://bank.example', () => 'bank-session', http);
-    expect(provider.providerType).toBe('AUTHENTICATION');
-    expect(provider.clientId).toBe('client-id');
-    await expect(provider.assertion('https://api.uat.veyra.co', 'JKT-1')).resolves.toBe('eyJ.a.b');
-    expect(calls[0].url).toBe('https://bank.example/sdk-assertion');
+  const provider = (http: typeof fetch, session: () => string | null = () => 'bank-session') =>
+    bankBackendAssertionProvider('client-id', 'bank-id', 'bank-secret', 'https://bank.example', session, http);
+
+  it('exchanges the bank session for an assertion at the token endpoint', async () => {
+    const { http, calls } = fakeFetch([{ status: 200, body: '{"access_token":"eyJ.a.b","token_type":"N_A"}' }]);
+    const p = provider(http);
+    expect(p.providerType).toBe('AUTHENTICATION');
+    expect(p.clientId).toBe('client-id');
+    await expect(p.assertion('https://api.uat.veyra.co', 'JKT-1')).resolves.toBe('eyJ.a.b');
+    expect(calls[0].url).toBe('https://bank.example/oauth2/token');
     expect(calls[0].init.method).toBe('POST');
-    expect(JSON.parse(calls[0].init.body as string)).toEqual({ audience: 'https://api.uat.veyra.co', jkt: 'JKT-1' });
-    expect((calls[0].init.headers as Record<string, string>).Authorization).toBe('Bearer bank-session');
+    const headers = calls[0].init.headers as Record<string, string>;
+    expect(headers['Content-Type']).toBe('application/x-www-form-urlencoded');
+    expect(headers.Authorization).toBe(`Basic ${Buffer.from('bank-id:bank-secret').toString('base64')}`);
+    expect(Object.fromEntries(new URLSearchParams(calls[0].init.body as string))).toEqual({
+      grant_type: 'urn:ietf:params:oauth:grant-type:token-exchange',
+      subject_token: 'bank-session',
+      subject_token_type: 'urn:ietf:params:oauth:token-type:access_token',
+      requested_token_type: 'urn:ietf:params:oauth:token-type:jwt',
+      audience: 'https://api.uat.veyra.co',
+    });
   });
 
   it('no session means no assertion and no call', async () => {
     const { http, calls } = fakeFetch([]);
-    await expect(bankBackendAssertionProvider('client-id', 'https://bank.example', () => null, http).assertion('https://api.uat.veyra.co', 'JKT')).resolves.toBeNull();
+    await expect(provider(http, () => null).assertion('https://api.uat.veyra.co', 'JKT')).resolves.toBeNull();
     expect(calls).toHaveLength(0);
+  });
+
+  it('a refused session (401) means no assertion', async () => {
+    const { http } = fakeFetch([{ status: 401, body: '' }]);
+    await expect(provider(http).assertion('https://api.uat.veyra.co', 'JKT')).resolves.toBeNull();
+  });
+
+  it('an error answer rejects and quotes the server', async () => {
+    const { http } = fakeFetch([{ status: 400, body: '{"error":"invalid_grant"}' }]);
+    await expect(provider(http).assertion('https://api.uat.veyra.co', 'JKT')).rejects.toThrow(/HTTP 400.*invalid_grant/);
   });
 
   it('parse rules: null on 401, throws on anything else unusable', () => {
     expect(parseAssertion(401, '')).toBeNull();
-    expect(parseAssertion(200, '{"assertion":"x"}')).toBe('x');
+    expect(parseAssertion(200, '{"access_token":"x"}')).toBe('x');
     expect(() => parseAssertion(500, '')).toThrow();
     expect(() => parseAssertion(200, '{"other":1}')).toThrow();
-    expect(() => parseAssertion(200, '{"assertion":""}')).toThrow();
+    expect(() => parseAssertion(200, '{"access_token":""}')).toThrow();
     expect(() => parseAssertion(200, 'not json')).toThrow();
   });
 });

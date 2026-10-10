@@ -29,10 +29,13 @@ export interface ProviderSettings {
   /** The secret of {@link bankClientId}. A secret in an app can be extracted. */
   bankClientSecret: string;
   /**
-   * PLACEHOLDER for your bank app's own logged-in session, sent to your bank backend as a bearer
-   * token; empty means nobody is signed in. Not a Veyra credential.
+   * The demo user's bank login. The app logs in with them (password grant at
+   * `{bankBackendBaseUrl}/oauth2/token`) to get the bank session both bank providers use. Empty
+   * means nobody is signed in. A real app takes them from its login screen and never stores the
+   * password. Not Veyra credentials.
    */
-  bankSessionToken: string;
+  username: string;
+  password: string;
 }
 
 type Fetch = typeof fetch;
@@ -68,14 +71,14 @@ export function assertionProvider(settings: ProviderSettings, http: Fetch = fetc
     required(settings.bankClientId, 'bankClientId'),
     required(settings.bankClientSecret, 'bankClientSecret'),
     bankBackend(settings),
-    bankSession(settings),
+    sessionFor(settings, http),
     http
   );
 }
 
 /** Only the bank backend that relays the SDK's calls — no client id, no secret. */
 export function proxyProvider(settings: ProviderSettings, http: Fetch = fetch): VeyraProxyProvider {
-  return bankBackendRelay(bankBackend(settings), bankSession(settings), http);
+  return bankBackendRelay(bankBackend(settings), sessionFor(settings, http), http);
 }
 
 /** Deprecated, testing only: just the client id and secret. */
@@ -83,8 +86,97 @@ export function clientSecretProvider(settings: ProviderSettings): VeyraClientSec
   return clientSecretCredentials(setting(settings.clientId), setting(settings.clientSecret));
 }
 
-function bankSession(settings: ProviderSettings): () => string | null {
-  return () => setting(settings.bankSessionToken) || null;
+/** One bank session per settings object, so a re-initialise keeps the signed-in user's token. */
+const sessions = new WeakMap<ProviderSettings, BankSession>();
+
+function sessionFor(settings: ProviderSettings, http: Fetch): () => Promise<string | null> {
+  let session = sessions.get(settings);
+  if (!session) {
+    session = bankSession(
+      bankBackend(settings),
+      required(settings.bankClientId, 'bankClientId'),
+      required(settings.bankClientSecret, 'bankClientSecret'),
+      setting(settings.username),
+      settings.password ?? '',
+      http
+    );
+    sessions.set(settings, session);
+  }
+  return session.token;
+}
+
+/** The signed-in user's bank session; see {@link bankSession}. */
+export interface BankSession {
+  /** The current session token, logging in when there is none (or it is about to expire). */
+  token: () => Promise<string | null>;
+  /** Forget the session (sign-out): the next call logs in again. */
+  clear: () => void;
+}
+
+/** When the server does not say, assume a short life; renew a little early. */
+const DEFAULT_LIFETIME_SECONDS = 300;
+const EXPIRY_MARGIN_SECONDS = 30;
+
+/**
+ * The signed-in user's **bank session**: an access token from your bank's authorization server,
+ * obtained by logging the user in with their username and password (OAuth 2.0 password grant).
+ * Both bank providers use it — the assertion provider as the token exchange's `subject_token`,
+ * the proxy provider as `Authorization: Bearer` on every relayed call.
+ *
+ * Request: `POST {baseUrl}/oauth2/token`, your bank's client as HTTP Basic
+ * `bankClientId:bankClientSecret`, form `grant_type=password&username=…&password=…`. Response:
+ * `{"access_token": "…", "expires_in": 3600, …}`. Cached until shortly before it expires;
+ * concurrent callers share one login. A refused login (400/401) or missing credentials resolve
+ * null (nobody signed in); any other failure rejects.
+ */
+export function bankSession(
+  baseUrl: string,
+  bankClientId: string,
+  bankClientSecret: string,
+  username: string,
+  password: string,
+  http: Fetch = fetch,
+  now: () => number = Date.now
+): BankSession {
+  let cached: { token: string; expiresAt: number } | null = null;
+  let inFlight: Promise<string | null> | null = null;
+
+  const login = async (): Promise<string | null> => {
+    if (!username || !password) return null;
+    const res = await http(`${baseUrl}/oauth2/token`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization: `Basic ${btoa(`${bankClientId}:${bankClientSecret}`)}`,
+      },
+      body: formEncode({ grant_type: 'password', username, password }),
+    });
+    if (res.status === 400 || res.status === 401) return null; // credentials refused: signed out
+    if (res.status < 200 || res.status > 299) throw new Error(`bank login answered HTTP ${res.status}`);
+    const json = JSON.parse(await res.text()) as { access_token?: unknown; expires_in?: unknown };
+    if (typeof json.access_token !== 'string' || !json.access_token) {
+      throw new Error('bank login answered without an access_token');
+    }
+    const lifetime = typeof json.expires_in === 'number' ? json.expires_in : DEFAULT_LIFETIME_SECONDS;
+    cached = { token: json.access_token, expiresAt: now() + Math.max(0, lifetime - EXPIRY_MARGIN_SECONDS) * 1000 };
+    return json.access_token;
+  };
+
+  return {
+    token: () => {
+      if (cached && now() < cached.expiresAt) return Promise.resolve(cached.token);
+      cached = null;
+      if (!inFlight) {
+        inFlight = login().finally(() => {
+          inFlight = null;
+        });
+      }
+      return inFlight;
+    },
+    clear: () => {
+      cached = null;
+    },
+  };
 }
 
 /**
@@ -129,14 +221,14 @@ export function bankBackendAssertionProvider(
   bankClientId: string,
   bankClientSecret: string,
   baseUrl: string,
-  session: () => string | null,
+  session: () => Promise<string | null>,
   http: Fetch = fetch
 ): VeyraAssertionProvider {
   return {
     providerType: 'AUTHENTICATION',
     clientId, // the OAuth client id Veyra issued to this app (public, not a secret) — the SDK's only credential
     assertion: async (audience) => {
-      const subjectToken = session();
+      const subjectToken = await session();
       if (!subjectToken) return null; // logged out
       const res = await http(`${baseUrl}/oauth2/token`, {
         method: 'POST',
@@ -194,18 +286,25 @@ export function parseAssertion(status: number, body: string): string | null {
  */
 export function bankBackendRelay(
   baseUrl: string,
-  session: () => string | null,
+  session: () => Promise<string | null>,
   http: Fetch = fetch
 ): VeyraProxyProvider {
   const forward = async (envelope: string): Promise<string> => {
-    const token = session();
+    // No bank session — signed out, or the login itself failed — means the call never left.
+    let token: string | null;
+    try {
+      token = await session();
+    } catch (e) {
+      throw new VeyraRelayError('OTHER', true, null, `Bank login failed: ${(e as Error)?.message}`);
+    }
+    if (!token) throw new VeyraRelayError('OTHER', true, null, 'Not signed in to the bank');
     let res: Response;
     try {
       res = await http(`${baseUrl}/issuertokengateway/v1/proxy`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          Authorization: `Bearer ${token}`,
         },
         body: envelope, // the envelope, unmodified
       });

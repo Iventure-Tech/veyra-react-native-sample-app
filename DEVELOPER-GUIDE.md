@@ -347,8 +347,9 @@ endpoint.
 
 **Your bank's side — the two endpoints the sample calls.** `VeyraAssertionProvider` and
 `VeyraProxyProvider` each need one endpoint on **your** side. Both carry your app's **own** session
-(the sample uses a placeholder, `VEYRA_PROVIDER.bankSessionToken` — replace it with your login
-session); neither is a Veyra credential. The assertion provider exchanges that session for the
+(the sample logs in with `VEYRA_PROVIDER.username`/`password` — a password grant at
+`{bankBackendBaseUrl}/oauth2/token` — and uses the returned access token; replace that with your own
+login); neither is a Veyra credential. The assertion provider exchanges that session for the
 assertion with an OAuth 2.0 token exchange (RFC 8693) at your authorization server:
 
 ```

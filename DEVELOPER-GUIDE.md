@@ -312,7 +312,7 @@ await Veyra.initialize({
 });
 ```
 
-`forward` sends the envelope to `POST {your API gateway}/issuertokengateway/v1` and resolves with
+`forward` sends the envelope to `POST {your API gateway}/issuertokengateway/v1/proxy` and resolves with
 Veyra's body unchanged; on failure it rejects with `VeyraRelayError` (the failure contract is
 below).
 
@@ -345,10 +345,11 @@ POST {your authorization server}/oauth2/token               (VeyraAssertionProvi
      &audience=<audience>
   →  200 {"access_token": "<compact JWT>", …}     401 when no user is signed in (resolve null)
 
-POST {your API gateway}/issuertokengateway/v1 (VeyraProxyProvider)
+POST {your API gateway}/issuertokengateway/v1/proxy (VeyraProxyProvider)
      body: the SDK's envelope, unchanged, for every method
-  →  your gateway checks the app's session and forwards the envelope to your issuer token
-     gateway (ITG). The ITG authenticates to Veyra with its own OAuth client-credentials token
+  →  your gateway checks the app's session, removes the `/issuertokengateway/v1` context and
+     forwards the envelope to your issuer token gateway (ITG) as `POST /proxy`.
+     The ITG authenticates to Veyra with its own OAuth client-credentials token
      (held server-side; an API key is not accepted), calls `service` + `path` with `method`,
      `query`, `headers` and `body`, and answers with Veyra's status and body unchanged
 ```
@@ -401,7 +402,7 @@ fails the call with `NOT_AUTHENTICATED` and sends nothing.
 sign:** copy it into `aud` only when it is a Veyra base URL you expect for that environment, and
 refuse anything else, so an assertion your backend signs can never be redeemed anywhere but Veyra.
 
-**`/issuertokengateway/v1` receives the envelope (version 1, public API).** Each `request` your
+**`/issuertokengateway/v1/proxy` receives the envelope (version 1, public API).** Each `request` your
 proxy provider receives is one JSON string that says everything about the call:
 
 ```json

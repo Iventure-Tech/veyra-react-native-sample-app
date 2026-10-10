@@ -155,7 +155,7 @@ describe('bankBackendRelay', () => {
     const { http, calls } = fakeFetch([{ status: 200, body: veyraBody }]);
     const relay = bankBackendRelay('https://bank.example', () => 'bank-session', http);
     await expect(relay.patch(envelope)).resolves.toBe(veyraBody);
-    expect(calls[0].url).toBe('https://bank.example/issuertokengateway/v1');
+    expect(calls[0].url).toBe('https://bank.example/issuertokengateway/v1/proxy');
     expect(calls[0].init.method).toBe('POST');
     expect(calls[0].init.body).toBe(envelope);
     expect((calls[0].init.headers as Record<string, string>).Authorization).toBe('Bearer bank-session');
@@ -169,7 +169,7 @@ describe('bankBackendRelay', () => {
     await r.put('{}');
     await r.delete('{}');
     await r.patch('{}');
-    expect(calls.map((c) => c.url)).toEqual(Array(5).fill('https://bank.example/issuertokengateway/v1'));
+    expect(calls.map((c) => c.url)).toEqual(Array(5).fill('https://bank.example/issuertokengateway/v1/proxy'));
     expect(calls.map((c) => c.init.method)).toEqual(Array(5).fill('POST'));
     expect((calls[0].init.headers as Record<string, string>).Authorization).toBeUndefined();
   });

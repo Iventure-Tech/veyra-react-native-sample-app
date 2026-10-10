@@ -182,12 +182,12 @@ export function parseAssertion(status: number, body: string): string | null {
 }
 
 /**
- * The proxy provider: send every SDK call through **your bank**. The SDK's envelope —
- * `{version, service, method, path, query, headers, body}` — goes, unchanged, as the body of
- * `POST {base}/issuertokengateway/v1`, whichever of the five functions the SDK called: the
+ * The proxy provider: send every SDK call through **your bank**. The SDK's envelope — `{version,
+ * service, method, path, query, headers, body}` — goes, unchanged, as the body of `POST
+ * {base}/issuertokengateway/v1/proxy`, whichever of the five functions the SDK called: the
  * envelope already names the method and the Veyra service. Your API gateway checks the app's
- * session and forwards it to your proxy backend (your ITG), which calls Veyra and answers with
- * Veyra's response body — returned here unchanged.
+ * session, removes the `/issuertokengateway/v1` context and forwards it to your ITG's `/proxy`,
+ * which calls Veyra and answers with Veyra's response body — returned here unchanged.
  *
  * This is called from the SDK's background work too (status polling, key refresh, credit
  * confirmations), so it must not depend on a screen being up.
@@ -201,7 +201,7 @@ export function bankBackendRelay(
     const token = session();
     let res: Response;
     try {
-      res = await http(`${baseUrl}/issuertokengateway/v1`, {
+      res = await http(`${baseUrl}/issuertokengateway/v1/proxy`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

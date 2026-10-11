@@ -458,16 +458,18 @@ proxy provider receives is one JSON string that says everything about the call:
 - New fields may be added under the same `version`; a breaking change bumps `version`.
 - When your proxy backend itself cannot complete a call it answers `200` with
   `{"response_status": "PROXY_FAILED", "response_status_reason": "…", "never_sent": true|false}`.
-  Return that body unchanged like any other: the SDK recognises it.
+  Return that body unchanged like any other: the SDK recognises it. `never_sent: true` ends the
+  call as a refused connection does (below); `false` or absent, as a timeout does.
 - Your proxy backend forwards `query`, every header and `body` to Veyra unmodified; resolve with
   Veyra's response body exactly as received.
 
 **The proxy provider's failure contract — say whether the request was sent.** Reject with a
 `VeyraRelayError(kind, neverSent, httpStatus?)` (exported by `veyra-sdk-react-native`):
 
-- `neverSent: true` **only** when the request provably never left the device. The call then ends
-  `NOT_SENT` and may be retried with the same order ID; use kind `'NO_NETWORK'` for "offline" — the
-  SDK then reports `NO_NETWORK_CONNECTION`.
+- `neverSent: true` **only** when the request provably never left the device. A payment or a
+  digitisation then ends `NOT_SENT` / `SDK_UNABLE_TO_CONNECT` and may be retried with the same order
+  ID; any other call ends `FAILED` / `SDK_UNABLE_TO_CONNECT`. Use kind `'NO_NETWORK'` for "offline" —
+  the SDK then reports `NO_NETWORK_CONNECTION`.
 - `neverSent: false` whenever it may have been delivered — a timeout, a dropped connection, a
   non-2xx answer, an answer you could not read. A payment then stays pending and the SDK reconciles
   it. **When in doubt, `false`**: it is the safe direction.
@@ -2018,7 +2020,7 @@ the cause. In 3.0.0 the promise resolves, and the cause is the outcome's `respon
 | `NO_ACTIVE_CARD` / `CARD_CANNOT_SHOW_QR` | Resolves `NOT_SENT` with the same reason |
 | `MODE_REFUSED` | Resolves `NOT_SENT` / `MODE_REFUSED` (on a tap: a `NOT_SENT` `result` event) |
 | `MISSING_MANDATORY_CONFIG` (no merchant registered) | Resolves `NOT_SENT` / `MISSING_MANDATORY_CONFIG` |
-| `DUPLICATE_MERCHANT_ORDER_ID` (`createPaymentContext`) | Resolves `FAILED` / `DUPLICATE_MERCHANT_ORDER_ID` with `originalPayment` — on `PaymentContextQr` here, and on `MerchantTapResult` and `CustomerQrChargeOutcome` (with code `94`) for the payment rails. Tell the merchant paid vs still confirming; never offer a retry |
+| None — new in 3.0.0. 2.x had no `DUPLICATE_MERCHANT_ORDER_ID` code and never refused a reused order ID | Resolves `FAILED` / `DUPLICATE_MERCHANT_ORDER_ID` with `originalPayment` — on `PaymentContextQr` from `createPaymentContext`, and on `MerchantTapResult` and `CustomerQrChargeOutcome` (with code `94`) for the payment rails. Tell the merchant paid vs still confirming; never offer a retry |
 | `REQUEST_FAILED` (network / backend failure) | Resolves with the triple: `PENDING` (`NO_RESPONSE_RECEIVED` / `UPSTREAM_ERROR`) for a payment or a change, `NOT_SENT` for a read or anything never sent, `FAILED` for a refusal |
 | A rejection from `inspectCustomerQr` (not a payment QR) | Resolves `NOT_SENT` / `INVALID_REQUEST` with `qr: null` — hint and stay armed |
 | A rejection from `chargeCustomerQr` (transport failure) | Always resolves `CustomerQrChargeOutcome`; offline is `NOT_SENT` / `NO_NETWORK_CONNECTION` |

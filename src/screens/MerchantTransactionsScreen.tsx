@@ -10,8 +10,9 @@ import {
   type MerchantReceipt,
   type MerchantTransaction,
 } from 'veyra-sdk-react-native';
+import { orderLookupText } from '../paymentResult';
 import { theme } from '../theme';
-import { QrTile, Busy, Button, formatAmount, Section } from '../ui';
+import { QrTile, Busy, Button, Field, formatAmount, Section } from '../ui';
 
 export function MerchantTransactionsScreen({
   route,
@@ -25,6 +26,28 @@ export function MerchantTransactionsScreen({
   // In-flight state for the manual "check merchant credit" ask, and its transient note.
   const [checkingCredit, setCheckingCredit] = useState(false);
   const [creditNote, setCreditNote] = useState<string | null>(null);
+  // Look up an order by your own order id (one call for every rail).
+  const [lookupOrderId, setLookupOrderId] = useState('');
+  const [lookingUp, setLookingUp] = useState(false);
+  const [lookupResult, setLookupResult] = useState<string | null>(null);
+
+  /**
+   * "What happened to this order?" by your own order id — e.g. after the app restarted before a
+   * result arrived, or for a PENDING sale. One call for every rail (tap, merchant QR, customer QR).
+   * A read: it resolves with `failureReason` when the gateway could not be asked; only a setup
+   * mistake rejects.
+   */
+  const lookUpOrder = async () => {
+    const orderId = lookupOrderId.trim();
+    setLookingUp(true);
+    try {
+      setLookupResult(orderLookupText(await merchant.paymentStatus(orderId)));
+    } catch (e) {
+      setLookupResult((e as VeyraError).message);
+    } finally {
+      setLookingUp(false);
+    }
+  };
 
   /**
    * Ask now. A resolving answer replaces the row here and in the list, so the button disappears;
@@ -252,7 +275,16 @@ export function MerchantTransactionsScreen({
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+      <Section title="Look up an order">
+        <Field label="Your order id" value={lookupOrderId} onChangeText={setLookupOrderId} />
+        <Button
+          title={lookingUp ? 'Looking up…' : 'Look up'}
+          disabled={lookingUp || lookupOrderId.trim() === ''}
+          onPress={lookUpOrder}
+        />
+        {lookupResult ? <Text style={styles.meta}>{lookupResult}</Text> : null}
+      </Section>
       {rows.length === 0 && <Text style={styles.meta}>No transactions yet.</Text>}
       {rows.map((t) => (
         <View key={t.merchantTransactionReference} style={styles.row}>

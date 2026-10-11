@@ -20,6 +20,7 @@ import {
   cpmChargeToParams,
   DUPLICATE_MERCHANT_ORDER_ID,
   duplicateOrderMessage,
+  keepsOrderId,
   notSentToParams,
   tapResultToParams,
 } from '../paymentResult';
@@ -33,12 +34,11 @@ type Rail = 'idle' | 'tap' | 'mpmCreating' | 'mpm' | 'cpmScan' | 'cpmConfirm' | 
  * A stand-in for the till's own order/basket/invoice id, which a real integration would take
  * from its POS rather than generate here.
  *
- * Required, and unique per merchant: the gateway refuses a reused one with
- * `DUPLICATE_MERCHANT_ORDER_ID`. The retry rule: an outcome that never reached the gateway
- * (`NOT_SENT`), or that the gateway did not send to the bank (`RETRY`), leaves the order id
- * usable, so the retry reuses it; any other outcome used it up,
- * so the next attempt gets a new one. The reference itself is the SDK's to mint and arrives on
- * the outcome.
+ * Required. The retry rule (`keepsOrderId`): an order can have several attempts. After
+ * `NOT_SENT`, `RETRY`, `DECLINED` or `FAILED` no money moved, so the retry reuses the order id;
+ * after `APPROVED` or `PENDING` the gateway refuses another payment for it
+ * (`DUPLICATE_MERCHANT_ORDER_ID`), so the next sale gets a new one. The reference itself is the
+ * SDK's to mint and arrives on the outcome.
  */
 const nextSampleOrderId = (): string => `ORDER-${Date.now()}`;
 
@@ -71,14 +71,14 @@ export function GetPaidScreen({
   // The amount the live rail was started with. The result must show what was charged,
   // not whatever is in the amount field by the time the outcome lands.
   const chargedRef = useRef(0);
-  // The order id kept for a retry after a NOT_SENT outcome; null means the next sale gets a new one.
+  // The order id kept for a retry after an attempt that moved no money; null means the next sale gets a new one.
   const retryOrderIdRef = useRef<string | null>(null);
   const currentOrderIdRef = useRef<string | null>(null);
   // The order id of the payment running right now (tap armed, QR being created, charge in flight);
   // null once its outcome has arrived. Cancel and leaving the screen name the payment by it.
   const inFlightOrderIdRef = useRef<string | null>(null);
 
-  /** The order id for this attempt: the unused one after NOT_SENT, otherwise a new one. */
+  /** The order id for this attempt: the one kept from an attempt that moved no money, otherwise a new one. */
   const orderIdForAttempt = (): string => {
     const id = retryOrderIdRef.current ?? nextSampleOrderId();
     retryOrderIdRef.current = null;
@@ -86,11 +86,9 @@ export function GetPaidScreen({
     return id;
   };
 
-  /** After an outcome: keep the order id only when the payment never reached the gateway. */
+  /** After an outcome: keep the order id unless the order is paid or may be (APPROVED / PENDING). */
   const attemptEnded = (status: ResponseStatus | null | undefined) => {
-    // NOT_SENT (never reached the gateway) and RETRY (the gateway did not send it to the bank) both
-    // leave the order id usable.
-    retryOrderIdRef.current = status === 'NOT_SENT' || status === 'RETRY' ? currentOrderIdRef.current : null;
+    retryOrderIdRef.current = keepsOrderId(status) ? currentOrderIdRef.current : null;
   };
 
   const active = merchantStatus === null || merchantStatus === 'ACTIVE';
@@ -193,8 +191,8 @@ export function GetPaidScreen({
   const startTap = async () => {
     if (!requireActive()) return;
     try {
-      // Your own order id — required, echoed back, unique across the merchant's payments. It is
-      // also how this payment is cancelled: merchant.cancelPayment(orderId).
+      // Your own order id — required and echoed back; a retry after an attempt that moved no money
+      // reuses it. It is also how this payment is cancelled: merchant.cancelPayment(orderId).
       const orderId = orderIdForAttempt();
       inFlightOrderIdRef.current = orderId;
       setCancelRefused(false);
@@ -350,8 +348,8 @@ export function GetPaidScreen({
     setCancelRefused(false);
     setRail('cpmCharging');
     try {
-      // The second argument is *your* order/basket/invoice id — required, and unique across the
-      // merchant's payments (reused only to retry a NOT_SENT outcome). The transaction reference
+      // The second argument is *your* order/basket/invoice id — required; reused to retry an
+      // attempt that moved no money (see keepsOrderId). The transaction reference
       // is minted by the SDK and comes back on the outcome; never invent one.
       const outcome = await merchant.chargeCustomerQr(cpm.handle, orderId);
       attemptEnded(outcome.responseStatus);

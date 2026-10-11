@@ -1,9 +1,12 @@
 import type {
   CustomerQrChargeOutcome,
   MerchantTapResult,
+  OrderPaymentStatus,
   OriginalPayment,
   PaymentContextStatus,
   PaymentOutcome,
+  ResponseStatus,
+  VeyraLookup,
 } from 'veyra-sdk-react-native';
 
 /**
@@ -383,3 +386,43 @@ export function walletPaymentToParams(
 export const DEVICE_NOT_BOUND_TITLE = "This card can't pay on this phone";
 export const DEVICE_NOT_BOUND_MESSAGE =
   'It was added on another device or before the app was reinstalled. Remove it and add it again on this phone.';
+
+/**
+ * The retry rule for your order id. An order can have several attempts: after `NOT_SENT`, `RETRY`,
+ * `DECLINED` or `FAILED` no money moved, so the retry keeps the **same** order id. After `APPROVED`
+ * or `PENDING` — or a status this app does not know, which is treated as pending — the order is
+ * paid or may be, and the gateway refuses another payment for it (`DUPLICATE_MERCHANT_ORDER_ID`).
+ */
+export function keepsOrderId(status: ResponseStatus | null | undefined): boolean {
+  return status === 'NOT_SENT' || status === 'RETRY' || status === 'DECLINED' || status === 'FAILED';
+}
+
+/**
+ * What to tell the merchant after `merchant.paymentStatus(orderId)` — "what happened to this
+ * order?". Branch on the order's `responseStatus`: paid, may still be going through, or not paid
+ * (pay again with the same order id). A read: `failureReason` says why the gateway could not be
+ * asked, and `value` is then what this device holds for the order, if anything.
+ */
+export function orderLookupText(lookup: VeyraLookup<OrderPaymentStatus>): string {
+  const order = lookup.value;
+  let text: string;
+  if (order) {
+    switch (order.responseStatus) {
+      case 'APPROVED':
+        text = 'Paid - do not take another payment for this order.';
+        break;
+      case 'PENDING':
+        text = 'A payment may still be going through - do not take another payment yet.';
+        break;
+      default: {
+        const reason = order.responseStatusReason ? ` · ${order.responseStatusReason}` : '';
+        text = `Not paid (${order.responseStatus}${reason}) - you can take a payment with the same order id.`;
+      }
+    }
+    text += ` ${order.attempts.length} attempt(s), answered by ${order.answeredBy.toLowerCase()}.`;
+  } else {
+    text = 'No record of this order on this device.';
+  }
+  if (lookup.failureReason) text += ` Could not ask the gateway: ${lookup.failureReason}.`;
+  return text;
+}

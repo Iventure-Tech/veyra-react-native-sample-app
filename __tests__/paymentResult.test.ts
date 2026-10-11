@@ -7,6 +7,7 @@ import { describe, expect, it } from '@jest/globals';
 import type {
   CustomerQrChargeOutcome,
   MerchantTapResult,
+  OrderPaymentStatus,
   PaymentContextStatus,
   PaymentOutcome,
 } from 'veyra-sdk-react-native';
@@ -17,6 +18,8 @@ import {
   contextSettlementToParams,
   cpmChargeToParams,
   duplicateOrderMessage,
+  keepsOrderId,
+  orderLookupText,
   tapResultToParams,
   walletPaymentToParams,
 } from '../src/paymentResult';
@@ -425,3 +428,61 @@ describe('RETRY', () => {
   });
 });
 
+
+describe('keepsOrderId', () => {
+  // An order can have several attempts: an outcome that moved no money keeps the order id for the
+  // retry; a paid (or maybe-paid) order never takes another payment.
+  it('keeps the order id after NOT_SENT, RETRY, DECLINED and FAILED', () => {
+    for (const s of ['NOT_SENT', 'RETRY', 'DECLINED', 'FAILED'] as const) {
+      expect(keepsOrderId(s)).toBe(true);
+    }
+  });
+  it('drops it after APPROVED, PENDING, or a status this app does not know', () => {
+    expect(keepsOrderId('APPROVED')).toBe(false);
+    expect(keepsOrderId('PENDING')).toBe(false);
+    expect(keepsOrderId(null)).toBe(false);
+    expect(keepsOrderId(undefined)).toBe(false);
+  });
+});
+
+describe('orderLookupText', () => {
+  const order = (over: Partial<OrderPaymentStatus> = {}): OrderPaymentStatus => ({
+    merchantOrderId: 'ORDER-1',
+    responseStatus: 'APPROVED',
+    responseStatusReason: null,
+    responseCode: '00',
+    merchantTransactionReference: 'REF-1',
+    transactionId: 'TX-1',
+    amountMinorUnits: 1000,
+    attempts: [],
+    answeredBy: 'GATEWAY',
+    ...over,
+  });
+  const found = (o: OrderPaymentStatus) => ({ value: o, failureReason: null, message: null });
+
+  it('a paid order: never take another payment', () => {
+    expect(orderLookupText(found(order()))).toContain('do not take another payment for this order');
+  });
+  it('a pending order: never retry', () => {
+    expect(orderLookupText(found(order({ responseStatus: 'PENDING' })))).toContain(
+      'may still be going through'
+    );
+  });
+  it('an unpaid order (no attempts = RETRY / UNABLE_TO_LOCATE_RECORD): pay again with the same order id', () => {
+    const text = orderLookupText(
+      found(order({ responseStatus: 'RETRY', responseCode: '25', responseStatusReason: 'UNABLE_TO_LOCATE_RECORD' }))
+    );
+    expect(text).toContain('Not paid (RETRY · UNABLE_TO_LOCATE_RECORD)');
+    expect(text).toContain('same order id');
+  });
+  it('says who answered and how many attempts there were', () => {
+    expect(
+      orderLookupText(found(order({ answeredBy: 'DEVICE', attempts: [order() as never, order() as never] })))
+    ).toContain('2 attempt(s), answered by device');
+  });
+  it('the gateway could not be asked: says why, and shows what the device holds', () => {
+    expect(
+      orderLookupText({ value: null, failureReason: 'NO_NETWORK_CONNECTION', message: null })
+    ).toBe('No record of this order on this device. Could not ask the gateway: NO_NETWORK_CONNECTION.');
+  });
+});

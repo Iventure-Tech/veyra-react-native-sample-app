@@ -1962,7 +1962,7 @@ every status lookup. One code always means one reason.
 | `12` | `RETRY` | `QR_EXPIRED` | QR payments: the payment code expired; nothing was charged | show a new QR for the **same** order |
 | `13` | `RETRY` | `AMOUNT_MISMATCH` | QR payments: amount or currency doesn't match the code; nothing was charged | show a new QR for the **same** order |
 | `25` | `RETRY` | `UNABLE_TO_LOCATE_RECORD` | a status lookup found no such payment, so nothing was debited | the order can be paid — use the **same** order ID |
-| `30` | `RETRY` | `INVALID_REQUEST` (or a more specific reason, e.g. `QR_EXPIRED` / `AMOUNT_MISMATCH` from the gateway's own QR checks) | the gateway refused the request before sending it on; nothing was charged | fix the request, then retry the **same** order |
+| `30` | `RETRY` | `INVALID_REQUEST` (or a more specific reason: `CALLER_NOT_AUTHORISED`, `DEVICE_ATTESTATION_FAILED`) | the gateway refused the request before sending it on; nothing was charged | fix the request, then retry the **same** order |
 | `91` | `RETRY` | `ISSUER_SWITCH_NOT_AVAILABLE` | Veyra could not connect to the next hop, so the debit was never requested; nothing was charged | try again shortly with the **same** order ID |
 | `94` | `FAILED` | `DUPLICATE_MERCHANT_ORDER_ID` | this merchant order ID is held by an attempt that is approved or still pending; `originalPayment` carries that attempt | do not take another payment for the order, and offer no retry. `originalPayment.responseStatus` `'PENDING'`: "A payment for this order is still being confirmed"; otherwise "This order is already paid" (§7.3) |
 

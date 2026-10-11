@@ -274,7 +274,7 @@ a fallback from one to the other.
 **`providerType` says which kind it is.** A JavaScript object can't inherit a default, so you write
 it out; the SDK checks it against the functions your object has.
 
-- **An unusable provider rejects `Veyra.initialize` with `VALIDATION`, naming the problem**: no
+- **An unusable provider rejects `Veyra.initialize` with `INVALID_CONFIGURATION`, naming the problem**: no
   provider; an object with both `assertion` and the request functions; a `providerType` that
   contradicts the functions present (e.g. `'AUTHENTICATION'` with `post`/`get`/…); a blank
   `clientId`; a missing function (e.g. `provider.send is required (VeyraProxyProvider)`) — never
@@ -1230,11 +1230,15 @@ integration. Do not build user-facing screens for them, and do not offer the use
 
 | `VeyraError.code` | When it happens | Fix |
 |---|---|---|
-| `NOT_CONFIGURED` | a call is made before `Veyra.initialize` | initialise the SDK first, at app start (§4) |
-| `NOT_SIGNED_IN` | a call is made after `Veyra.signOut()`, with no customer | call `Veyra.initialize` with the customer's `customerId` before using the SDK (§4.1) |
-| `VALIDATION` (`field`) | `Veyra.initialize` was given a configuration it can't use — a provider it can't use (`field` is `'provider'`), a provider of a different kind from an earlier `initialize` in this app process, or a missing `customerId` / environment / `appleTeamId` | pass a valid configuration; the message names the problem (§4.2) |
-| `SESSION_REQUIRED` | a payment method was called without the payment-screen session open | mount `usePaySession` / `useGetPaidSession` on the payment screen (§5) |
-| `UNSUPPORTED_ON_PLATFORM` | the method doesn't exist on this platform — e.g. wallet tap-to-pay on iOS | don't call it on this platform (§10) |
+| `NOT_CONFIGURED` | any call before `Veyra.initialize`, including — on Android — a call made before an Activity is attached ("no Activity attached") | initialise the SDK first, at app start, and call the SDK only once the app is on screen (§4) |
+| `NOT_SIGNED_IN` | no customer: a call made after `Veyra.signOut()` | call `Veyra.initialize` with the customer's `customerId` before using the SDK (§4.1) |
+| `INVALID_CONFIGURATION` | `Veyra.initialize` was given a configuration it can't use: an unusable provider; a provider of a different kind from an earlier `initialize` in this app process; a blank `customerId`; missing required config (environment, payment app provider ID, token requestor ID, recommendation standard version, and `appleTeamId` on iOS) | pass a valid configuration; the message names the exact problem (§4.2) |
+| `SESSION_REQUIRED` | a payment call without its screen session — `merchant.tap.*` without `useGetPaidSession`, `wallet.setActiveCard` without `usePaySession`. The same calls are gated on Android and iOS | mount the session hook on the payment screen (§5) |
+| `UNSUPPORTED_ON_PLATFORM` | a method this platform can't perform — e.g. wallet tap-to-pay on iOS raises it instead of doing nothing | don't call it on this platform (§10) |
+
+Two things that are **not** thrown, though they stop a call: a bad call argument (a blank
+`merchantOrderId`, an amount ≤ 0) resolves `NOT_SENT` / `INVALID_REQUEST`, and the other mode's
+payment being in flight resolves `NOT_SENT` / `MODE_REFUSED` (Table A).
 
 `UNKNOWN` is a rejection the bridge could not classify: log it and report it.
 
@@ -1248,13 +1252,14 @@ not the outcome of the original call. That call still ends with its own outcome.
 class VeyraError extends Error {
   code: VeyraErrorCode;          // the stable, typed code above — branch on this
   nativeErrorCode: string | null;// the platform's own error name, when there is one (Android)
-  field: string | null;          // the offending parameter, for code === 'VALIDATION'
+  field: string | null;          // not set by any setup error — read the message
 }
 ```
 
-`code` is the contract. `nativeErrorCode` and `field` are **diagnostics**: log them, show them in a
-support screen, but never branch on them — the same `code` can arrive with different native codes on
-Android and iOS. On iOS `nativeErrorCode` is usually `null`.
+`code` is the contract. `nativeErrorCode` is a **diagnostic**: log it, show it in a support
+screen, but never branch on it — the same `code` can arrive with different native codes on
+Android and iOS. On iOS `nativeErrorCode` is usually `null`. `field` stays on the type, but no
+setup error sets it: the message names the problem.
 
 ### 9.2 Processing outcomes — returned as the response triple
 

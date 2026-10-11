@@ -550,8 +550,8 @@ All methods return promises; all failures are typed `VeyraError`s.
 (activation needed — `activationMethods` lists the OTP channels), or `'DECLINED'`. Any other
 code — including none at all — means this SDK version cannot interpret the answer: the token is
 **discarded** (nothing provisioned, no card added, even if the response carried full token data)
-and the call fails with a message beginning `UNRECOGNISED_RESPONSE_CODE:`. Offer a retry, and
-update the SDK if it persists.
+and the call resolves `FAILED` with reason `UNRECOGNISED_RESPONSE_CODE` (§9.2, Table A). Start a
+new add-card, and update the SDK if it persists.
 iOS-only param: `bankName` (shown on the stored card). Android additionally requires
 `consumerIdentifier`, `bvn`, `accountHolderAddress`, `mobileNumber`.
 
@@ -1236,9 +1236,6 @@ integration. Do not build user-facing screens for them, and do not offer the use
 | `SESSION_REQUIRED` | a payment method was called without the payment-screen session open | mount `usePaySession` / `useGetPaidSession` on the payment screen (§5) |
 | `UNSUPPORTED_ON_PLATFORM` | the method doesn't exist on this platform — e.g. wallet tap-to-pay on iOS | don't call it on this platform (§10) |
 
-Two more codes guard `wallet.showQrToPay` the same way: `NO_ACTIVE_CARD` (no card is set active —
-select a payable card first) and `CARD_CANNOT_SHOW_QR` (the active card was added before it could
-show a payment QR — re-add it). Gate the button on the card instead of handling these at runtime.
 `UNKNOWN` is a rejection the bridge could not classify: log it and report it.
 
 **A cancel answer is not an error.** `TOO_LATE_TO_CANCEL_REQUEST_ALREADY_SENT` and
@@ -1377,12 +1374,14 @@ Some calls are not payment outcomes and have their own vocabularies:
 | `NOT_SENT` | — | `MERCHANT_PROFILE_INCOMPLETE` | the merchant's account details are missing | finish merchant setup |
 | `NOT_SENT` | — | `MISSING_MANDATORY_CONFIG` | terminal / merchant config is missing | register the merchant / pass the config |
 | `NOT_SENT` | — | `MODE_REFUSED` | the other mode's payment is in progress | wait for it to finish |
-| `NOT_SENT` | — | `UNRECOGNISED_RESPONSE_CODE` | add-card was answered with a code this SDK version doesn't know; nothing was stored | retry; update the SDK if it persists |
+| `NOT_SENT` | — | `NO_ACTIVE_CARD` | wallet: no card is set as active (e.g. `wallet.showQrToPay`) | ask the user to choose a card |
+| `NOT_SENT` | — | `CARD_CANNOT_SHOW_QR` | wallet: the active card can't produce a QR | use another card or tap |
 | `NOT_SENT` | — | `SDK_INTERNAL_ERROR` | the SDK failed before sending | report to support; retry is safe |
 | `PENDING` | `68` | `NO_RESPONSE_RECEIVED` | the request was sent but no answer came back (timeout, connection lost) | wait; the SDK resolves it |
 | `PENDING` | `06` | `UPSTREAM_ERROR` | Veyra answered with an error or something unreadable | wait; the SDK resolves it |
 | `PENDING` | — | `SDK_INTERNAL_ERROR` | the SDK failed after sending | wait; the SDK still resolves the payment |
 | `FAILED` | — | `NO_RESPONSE_RECEIVED` / `UPSTREAM_ERROR` | **add-card only**: no answer after sending | start a new digitisation |
+| `FAILED` | — | `UNRECOGNISED_RESPONSE_CODE` | **add-card only**: the Veyra token service answered with a code this SDK version doesn't know; the card was discarded, nothing stored | start a new add-card; update the SDK if it persists |
 
 **`NO_NETWORK_CONNECTION` vs `SDK_UNABLE_TO_CONNECT` vs `ONLINE_REQUIRED`.** All three end with
 "get online", and they need different copy:
@@ -1434,9 +1433,9 @@ every status lookup. One code always means one reason.
 |---|---|---|---|---|
 | `00` | `APPROVED` | `APPROVED` | approved | complete |
 | `05` | `DECLINED` | `DO_NOT_HONOR` | the bank refused without a specific reason | show it; another payment method |
-| `07` | `DECLINED` | `ACCOUNT_VALIDATION_FAILED` | the account could not be validated | show it |
+| `07` | `FAILED` | `ACCOUNT_VALIDATION_FAILED` | the beneficiary account failed validation before any transfer was made; nothing was dispatched | check the merchant's account details; retry with a new order ID |
 | `14` | `DECLINED` | `INVALID_TOKEN` | the card token is not valid | the customer should re-add the card |
-| `21` | `DECLINED` | `NAME_ENQUIRY_FAILED` | the beneficiary account lookup failed | check the merchant's account details |
+| `21` | `FAILED` | `NAME_ENQUIRY_FAILED` | the beneficiary account lookup could not be completed; nothing was dispatched | retry with a new order ID |
 | `51` | `DECLINED` | `INSUFFICIENT_FUNDS` | not enough funds | another payment method |
 | `54` | `DECLINED` | `EXPIRED_CARD_OR_TOKEN` | the card or token has expired | re-add the card |
 | `58` | `DECLINED` | `DOMAIN_RESTRICTION_FAILED` | the card can't be used this way (wrong channel / domain) | another payment method |

@@ -32,7 +32,8 @@ export function RegisterMerchantScreen({
   });
 
   useEffect(() => {
-    merchant.getSettlementBanks().then(setBanks).catch(() => {});
+    // A read: the banks, or a reason the list could not be loaded (the picker just stays empty).
+    merchant.getSettlementBanks().then((list) => setBanks(list.banks)).catch(() => {});
   }, []);
 
   const set = (key: keyof typeof form) => (v: string) => setForm({ ...form, [key]: v });
@@ -60,10 +61,18 @@ export function RegisterMerchantScreen({
       if (result.success) {
         Alert.alert('Registered', `Merchant ${result.merchantId} (${result.merchantStatus ?? 'PENDING'})`);
         navigation.goBack();
+      } else if (result.responseStatus === 'PENDING') {
+        // Sent, but no usable answer: the merchant may have been registered. Check before retrying.
+        Alert.alert('Registration not confirmed', 'Check the merchant status before registering again.');
       } else {
-        Alert.alert('Registration failed', result.message ?? '');
+        // FAILED (the gateway refused it) or NOT_SENT (never sent — fix the reason and retry).
+        Alert.alert(
+          'Registration failed',
+          `${result.message ?? 'Not registered'} (${result.responseStatusReason ?? result.responseStatus ?? '-'})`
+        );
       }
     } catch (e) {
+      // Only a setup mistake rejects.
       Alert.alert('Registration failed', (e as Error).message);
     }
   };

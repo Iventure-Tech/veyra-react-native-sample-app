@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useIsFocused, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
@@ -180,6 +180,9 @@ export function PayScreen({
   );
 
   useEffect(() => {
+    // Tap-to-pay is Android-only: on iOS onTapEvent throws UNSUPPORTED_ON_PLATFORM, so subscribe
+    // only where the card can be tapped.
+    if (Platform.OS !== 'android') return;
     const sub = wallet.onTapEvent((e: WalletTapEvent) => {
       if (e.type === 'transactionStarted') setTapStatus('Paying…');
       if (e.type === 'transactionCompleted') {
@@ -207,9 +210,20 @@ export function PayScreen({
         style: 'destructive',
         onPress: async () => {
           try {
-            await wallet.deactivateToken(card.tokenUniqueReference ?? card.id);
+            const removal = await wallet.deactivateToken(card.tokenUniqueReference ?? card.id);
+            // Only APPROVED removed the card; anything else leaves it in the wallet, so say why.
+            if (removal.responseStatus !== 'APPROVED') {
+              Alert.alert(
+                'Card not removed',
+                removal.responseStatusReason === 'NO_NETWORK_CONNECTION'
+                  ? 'No internet connection — connect and try again.'
+                  : `${removal.message ?? 'The card was not removed'} (${removal.responseStatusReason ?? removal.responseStatus})`
+              );
+              return;
+            }
             reload();
           } catch (e) {
+            // Only a setup mistake rejects.
             Alert.alert('Could not remove card', (e as Error).message);
           }
         },

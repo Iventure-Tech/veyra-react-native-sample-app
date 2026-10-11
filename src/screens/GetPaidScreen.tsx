@@ -9,13 +9,16 @@ import {
   VeyraError,
   type MerchantTapEvent,
   type PaymentContextQr,
+  type ResponseStatus,
   type ScannedCustomerQr,
 } from 'veyra-sdk-react-native';
 import type { RootStackParamList } from '../../App';
 import {
   contextSettlementToParams,
-  cpmChargeFailureToParams,
   cpmChargeToParams,
+  DUPLICATE_MERCHANT_ORDER_ID,
+  duplicateOrderMessage,
+  notSentToParams,
   tapResultToParams,
 } from '../paymentResult';
 import { Scanner } from '../Scanner';
@@ -28,8 +31,11 @@ type Rail = 'idle' | 'tap' | 'mpm' | 'cpmScan' | 'cpmConfirm' | 'cpmCharging';
  * A stand-in for the till's own order/basket/invoice id, which a real integration would take
  * from its POS rather than generate here.
  *
- * Required, and unique per merchant across all its payments, whatever their outcome: the gateway
- * refuses a reused one with `DUPLICATE_MERCHANT_ORDER_ID`, so a retry needs a new order id. The reference itself is the SDK's to mint and arrives on the outcome.
+ * Required, and unique per merchant: the gateway refuses a reused one with
+ * `DUPLICATE_MERCHANT_ORDER_ID`. The retry rule: an outcome that never reached the gateway
+ * (`NOT_SENT`) leaves the order id unused, so the retry reuses it; any other outcome used it up,
+ * so the next attempt gets a new one. The reference itself is the SDK's to mint and arrives on
+ * the outcome.
  */
 const nextSampleOrderId = (): string => `ORDER-${Date.now()}`;
 
@@ -60,6 +66,22 @@ export function GetPaidScreen({
   // The amount the live rail was started with. The result must show what was charged,
   // not whatever is in the amount field by the time the outcome lands.
   const chargedRef = useRef(0);
+  // The order id kept for a retry after a NOT_SENT outcome; null means the next sale gets a new one.
+  const retryOrderIdRef = useRef<string | null>(null);
+  const currentOrderIdRef = useRef<string | null>(null);
+
+  /** The order id for this attempt: the unused one after NOT_SENT, otherwise a new one. */
+  const orderIdForAttempt = (): string => {
+    const id = retryOrderIdRef.current ?? nextSampleOrderId();
+    retryOrderIdRef.current = null;
+    currentOrderIdRef.current = id;
+    return id;
+  };
+
+  /** After an outcome: keep the order id only when the payment never reached the gateway. */
+  const attemptEnded = (status: ResponseStatus | null | undefined) => {
+    retryOrderIdRef.current = status === 'NOT_SENT' ? currentOrderIdRef.current : null;
+  };
 
   const active = merchantStatus === null || merchantStatus === 'ACTIVE';
 
@@ -97,7 +119,12 @@ export function GetPaidScreen({
           setRail('idle');
           setTapSessionId(null);
           setHint(null);
-          if (e.result.status === 'APPROVED' && e.result.merchantTransactionReference) {
+          attemptEnded(e.result.responseStatus);
+          // Your own cancel is not a result.
+          if (e.result.responseStatus === 'NOT_SENT' && e.result.responseStatusReason === 'CANCELLED') {
+            break;
+          }
+          if (e.result.responseStatus === 'APPROVED' && e.result.merchantTransactionReference) {
             setLastApprovedRef(e.result.merchantTransactionReference);
           }
           navigation.navigate(
@@ -147,14 +174,16 @@ export function GetPaidScreen({
     try {
       const { sessionId } = await merchant.tap.start({
         amountMinorUnits: minorUnits,
-        // Your own order id — required, echoed back, unique across all of the merchant's payments.
-        merchantOrderId: nextSampleOrderId(),
+        // Your own order id — required, echoed back, unique across the merchant's payments.
+        merchantOrderId: orderIdForAttempt(),
       });
       chargedRef.current = minorUnits;
       setTapSessionId(sessionId);
       setRail('tap');
       setHint('Ask the customer to tap their phone or card');
     } catch (e) {
+      // Only a setup mistake rejects; a refusal (blank order id, the other mode busy) arrives as
+      // a NOT_SENT `result` event.
       Alert.alert('Cannot start', (e as VeyraError).message);
     }
   };
@@ -168,14 +197,32 @@ export function GetPaidScreen({
   const showMpmQr = async () => {
     if (!requireActive()) return;
     try {
-      const qr = await merchant.createPaymentContext(minorUnits, undefined, nextSampleOrderId());
+      const qr = await merchant.createPaymentContext(minorUnits, undefined, orderIdForAttempt());
+      attemptEnded(qr.responseStatus);
+      // Creating the QR ends with an outcome: render it only when it was made.
+      if (qr.responseStatus !== 'APPROVED' || !qr.txRef || !qr.mpmPayload) {
+        if (qr.responseStatus === 'NOT_SENT') {
+          navigation.navigate('PaymentResult', notSentToParams(qr.message, qr.responseStatusReason, minorUnits));
+        } else if (qr.responseStatusReason === DUPLICATE_MERCHANT_ORDER_ID) {
+          Alert.alert('Order already used', duplicateOrderMessage(qr.originalPayment));
+        } else {
+          // FAILED (the gateway refused it) or PENDING (sent, no usable answer): no QR — start again.
+          Alert.alert(
+            'Cannot create QR',
+            `${qr.message ?? 'No payment code was created'} (${qr.responseStatusReason ?? qr.responseStatus})`
+          );
+        }
+        return;
+      }
+      const txRef = qr.txRef;
       chargedRef.current = minorUnits;
       setMpmQr(qr);
       setMpmState('PENDING');
       setMpmExpired(false);
       setRail('mpm');
       pollRef.current = setInterval(async () => {
-        const status = await merchant.contextStatus(qr.txRef).catch(() => null);
+        // A poll that could not be made carries a failureReason and no value: just ask again.
+        const status = (await merchant.contextStatus(txRef).catch(() => null))?.value;
         if (!status) return;
         setMpmState(status.state);
         // An expired code is not an outcome: blank the QR and stay here with the
@@ -187,7 +234,7 @@ export function GetPaidScreen({
         }
         if (status.isSettled) {
           if (pollRef.current) clearInterval(pollRef.current);
-          if (status.isApproved) setLastApprovedRef(qr.txRef);
+          if (status.isApproved) setLastApprovedRef(txRef);
           setRail('idle');
           setMpmQr(null);
           // The code is spent — stop the SDK expiry timer so it cannot fire behind the result.
@@ -199,13 +246,8 @@ export function GetPaidScreen({
         }
       }, 2000);
     } catch (e) {
-      const err = e as VeyraError;
-      Alert.alert(
-        'Cannot create QR',
-        (err.code as string) === 'DUPLICATE_MERCHANT_ORDER_ID'
-          ? 'This order id is already used by another payment — start a new sale'
-          : err.message
-      );
+      // Only a setup mistake rejects.
+      Alert.alert('Cannot create QR', (e as VeyraError).message);
     }
   };
 
@@ -219,13 +261,17 @@ export function GetPaidScreen({
 
   const onCpmScan = async (payload: string) => {
     try {
-      const scanned = await merchant.inspectCustomerQr(payload);
-      setCpm(scanned);
+      const inspection = await merchant.inspectCustomerQr(payload);
+      if (inspection.responseStatus !== 'APPROVED' || !inspection.qr) {
+        // Not a payment QR (NOT_SENT / INVALID_REQUEST): hint and stay armed — the scanner keeps
+        // running so the merchant can just aim at the right code (mirror of the native samples).
+        Alert.alert('Not a payment QR', inspection.message ?? 'Scan the customer’s payment QR');
+        return;
+      }
+      setCpm(inspection.qr);
       setRail('cpmConfirm');
     } catch (e) {
-      // Not a payment QR: hint and stay armed — the scanner keeps running so the
-      // merchant can just aim at the right code (mirror of the native samples).
-      Alert.alert('Not a payment QR', (e as VeyraError).message);
+      Alert.alert('Cannot read QR', (e as VeyraError).message);
     }
   };
 
@@ -237,20 +283,18 @@ export function GetPaidScreen({
     // the idle screen here reads as the payment having vanished.
     setRail('cpmCharging');
     try {
-      // The second argument is *your* order/basket/invoice id — required, and unique across all of
-      // the merchant's payments (a retry needs a new one). The transaction reference
+      // The second argument is *your* order/basket/invoice id — required, and unique across the
+      // merchant's payments (reused only to retry a NOT_SENT outcome). The transaction reference
       // is minted by the SDK and comes back on the outcome; never invent one.
-      const outcome = await merchant.chargeCustomerQr(cpm.handle, nextSampleOrderId());
-      if (outcome.approved && outcome.merchantTransactionReference) {
+      const outcome = await merchant.chargeCustomerQr(cpm.handle, orderIdForAttempt());
+      attemptEnded(outcome.responseStatus);
+      if (outcome.responseStatus === 'APPROVED' && outcome.merchantTransactionReference) {
         setLastApprovedRef(outcome.merchantTransactionReference);
       }
       navigation.navigate('PaymentResult', cpmChargeToParams(outcome, charged));
     } catch (e) {
-      // Never reached the gateway: nothing was recorded, so the result carries no receipt.
-      navigation.navigate(
-        'PaymentResult',
-        cpmChargeFailureToParams((e as VeyraError).message, charged)
-      );
+      // Only a setup mistake rejects.
+      Alert.alert('Cannot charge', (e as VeyraError).message);
     } finally {
       setCpm(null);
       setRail('idle');
@@ -322,7 +366,7 @@ export function GetPaidScreen({
               </View>
             ) : (
               <QrTile>
-                <QRCode value={mpmQr.mpmPayload} size={240} />
+                <QRCode value={mpmQr.mpmPayload ?? ''} size={240} />
               </QrTile>
             )}
           </View>

@@ -41,15 +41,16 @@ export function AddCardScreen({
   useEffect(() => {
     wallet
       .getBanks()
-      .then(setBanks)
-      .catch((e) => {
-        // An offline device is the one failure worth interrupting for: the bank picker will
-        // stay empty until the user reconnects, and nothing on this screen tells them that.
-        // Everything else stays silent — the user can still type the institution code.
-        if ((e as VeyraError).code === 'NO_NETWORK_CONNECTION') {
+      .then((list) => {
+        setBanks(list.banks);
+        // A read that could not be made answers with a reason, not a rejection. An offline device
+        // is the one worth interrupting for: the bank picker will stay empty until the user
+        // reconnects. Everything else stays silent — the user can still type the institution code.
+        if (list.responseStatusReason === 'NO_NETWORK_CONNECTION') {
           Alert.alert('No internet connection', 'Reconnect and reopen this screen to load banks.');
         }
-      });
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -114,7 +115,12 @@ export function AddCardScreen({
         accountNumberSource: 'MANUAL',
       });
       if (!eligibility.isApproved) {
-        Alert.alert('Account not eligible', eligibility.message ?? eligibility.responseCode ?? 'Declined');
+        // DECLINED: the account is not eligible. FAILED: the check could not be run. NOT_SENT: it
+        // never reached Veyra — fix the reason (e.g. the connection) and check again as is.
+        Alert.alert(
+          eligibility.responseStatus === 'DECLINED' ? 'Account not eligible' : 'Could not check the account',
+          `${eligibility.message ?? 'Not approved'} (${eligibility.responseStatusReason ?? eligibility.responseStatus ?? '-'})`
+        );
         setStep('form');
         return;
       }
@@ -134,7 +140,11 @@ export function AddCardScreen({
         bankName: bankName ?? banks.find((b) => b.institutionCode === form.institutionCode)?.name,
       });
       if (!result.isApproved && !result.requiresActivation) {
-        Alert.alert('Declined', result.message ?? result.responseCode ?? 'Declined');
+        // Digitise is never PENDING: DECLINED, FAILED, or NOT_SENT (never reached Veyra — retry as is).
+        Alert.alert(
+          result.responseStatus === 'NOT_SENT' ? 'Card not added' : 'Declined',
+          `${result.message ?? 'Not approved'} (${result.responseStatusReason ?? result.responseStatus ?? '-'})`
+        );
         setStep('form');
         return;
       }
@@ -147,7 +157,8 @@ export function AddCardScreen({
         navigation.goBack();
       }
     } catch (e) {
-      Alert.alert('Add card failed', (e as Error).message);
+      // Only a setup mistake rejects.
+      Alert.alert('Add card failed', (e as VeyraError).message);
       setStep('form');
     }
   };
@@ -155,7 +166,14 @@ export function AddCardScreen({
   const requestCode = async (method: ActivationMethodInfo) => {
     if (!tokenRef) return;
     try {
-      await wallet.requestActivationCode(tokenRef, method.medium, method.contact);
+      const sent = await wallet.requestActivationCode(tokenRef, method.medium, method.contact);
+      if (sent.responseStatus !== 'APPROVED') {
+        Alert.alert(
+          'Could not send code',
+          `${sent.message ?? 'The code was not sent'} (${sent.failureCode ?? sent.responseStatusReason ?? sent.responseStatus ?? '-'})`
+        );
+        return;
+      }
       await wallet.observeActivation(tokenRef);
       observedRef.current = tokenRef;
       setStep('enterCode');
@@ -173,7 +191,12 @@ export function AddCardScreen({
         Alert.alert('Card activated', 'Your card is ready to pay.');
         navigation.goBack();
       } else {
-        Alert.alert('Activation failed', response.message ?? '');
+        // failureCode says what to do (CODE_INVALID: try again; CODE_EXPIRED: resend…); a NOT_SENT
+        // answer never reached Veyra, so the same code can be submitted again.
+        Alert.alert(
+          'Activation failed',
+          `${response.message ?? ''} (${response.failureCode ?? response.responseStatusReason ?? response.responseStatus ?? '-'})`
+        );
         setStep('enterCode');
       }
     } catch (e) {

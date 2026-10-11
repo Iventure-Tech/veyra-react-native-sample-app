@@ -2,7 +2,7 @@ import React, { useCallback, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { merchant, type StoredMerchant } from 'veyra-sdk-react-native';
+import { merchant, type MerchantStatusResult, type StoredMerchant } from 'veyra-sdk-react-native';
 import type { RootStackParamList } from '../../App';
 import { theme } from '../theme';
 import { Busy, Button, Field, FormScrollView, Section } from '../ui';
@@ -54,14 +54,29 @@ export function MerchantSettingsScreen({
     setEditing(true);
   };
 
-  const run = async (label: string, op: () => Promise<unknown>, done?: string) => {
+  /**
+   * Every merchant call answers with an outcome; only a setup mistake rejects. Resolves true when
+   * the call was APPROVED, so a caller (Save) only moves on when it actually happened.
+   */
+  const run = async (label: string, op: () => Promise<MerchantStatusResult>, done?: string): Promise<boolean> => {
     setBusy(label);
     try {
-      await op();
+      const result = await op();
       reload();
+      if (result.responseStatus !== 'APPROVED') {
+        // FAILED (refused), PENDING (sent, no usable answer — check the status before repeating it)
+        // or NOT_SENT (never sent — fix the reason and retry).
+        Alert.alert(
+          `${label} failed`,
+          `${result.message ?? 'Not done'} (${result.responseStatusReason ?? result.responseStatus})`
+        );
+        return false;
+      }
       if (done) Alert.alert(done);
+      return true;
     } catch (e) {
       Alert.alert(`${label} failed`, (e as Error).message);
+      return false;
     } finally {
       setBusy(null);
     }
@@ -96,7 +111,7 @@ export function MerchantSettingsScreen({
           <Button
             title={busy ? 'Saving…' : 'Save changes'}
             disabled={!!busy}
-            onPress={() => run('Update', () => merchant.update(form), 'Profile updated').then(() => setEditing(false))}
+            onPress={() => run('Update', () => merchant.update(form), 'Profile updated').then((ok) => ok && setEditing(false))}
           />
           <Button title="Cancel" destructive disabled={!!busy} onPress={() => setEditing(false)} />
         </Section>

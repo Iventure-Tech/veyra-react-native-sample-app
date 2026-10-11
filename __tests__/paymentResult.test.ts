@@ -15,10 +15,9 @@ import {
   DEVICE_NOT_BOUND_MESSAGE,
   DEVICE_NOT_BOUND_TITLE,
   contextSettlementToParams,
-  cpmChargeFailureToParams,
   cpmChargeToParams,
+  duplicateOrderMessage,
   tapResultToParams,
-  walletPaymentFailureToParams,
   walletPaymentToParams,
 } from '../src/paymentResult';
 
@@ -32,6 +31,8 @@ describe('AUTO_RETURN_MS', () => {
 
 const tap = (over: Partial<MerchantTapResult> = {}): MerchantTapResult => ({
   responseCode: null,
+  responseStatus: null,
+  responseStatusReason: null,
   status: null,
   message: null,
   amountDisplay: null,
@@ -42,6 +43,7 @@ const tap = (over: Partial<MerchantTapResult> = {}): MerchantTapResult => ({
   merchantStatus: null,
   creditTransactionId: null,
   isCreditConfirmationSupported: null,
+  originalPayment: null,
   ...over,
 });
 
@@ -50,7 +52,7 @@ describe('tapResultToParams', () => {
     const params = tapResultToParams(
       tap({
         responseCode: '00',
-        status: 'APPROVED',
+        responseStatus: 'APPROVED',
         message: 'Approved',
         cardScheme: 'AFRIGO',
         merchantTransactionReference: 'REF-1',
@@ -71,7 +73,7 @@ describe('tapResultToParams', () => {
     const params = tapResultToParams(
       tap({
         responseCode: '00',
-        status: 'APPROVED',
+        responseStatus: 'APPROVED',
         merchantTransactionReference: 'REF-1',
         creditTransactionId: 'CREDIT-1',
         isCreditConfirmationSupported: true,
@@ -89,7 +91,7 @@ describe('tapResultToParams', () => {
     const params = tapResultToParams(
       tap({
         responseCode: '05',
-        status: 'DECLINED',
+        responseStatus: 'DECLINED',
         merchantTransactionReference: 'REF-1',
         isCreditConfirmationSupported: true,
       }),
@@ -98,9 +100,9 @@ describe('tapResultToParams', () => {
     expect(params.creditConfirmation).toBeUndefined();
   });
 
-  it('treats 99 as pending and offers NO receipt — the status can still change', () => {
+  it('shows PENDING as pending and offers NO receipt — the status can still change', () => {
     const params = tapResultToParams(
-      tap({ responseCode: '99', status: 'PENDING', merchantTransactionReference: 'REF-2' }),
+      tap({ responseCode: '68', responseStatus: 'PENDING', merchantTransactionReference: 'REF-2' }),
       100
     );
 
@@ -109,32 +111,58 @@ describe('tapResultToParams', () => {
     expect(params.receiptFor).toBeUndefined();
   });
 
-  it('declines everything that is not approved or pending, receipt included', () => {
-    for (const code of ['05', '06', '91', '96']) {
-      const params = tapResultToParams(
-        tap({ responseCode: code, status: 'DECLINED', merchantTransactionReference: 'REF-3' }),
-        100
-      );
-      expect(params.outcome).toBe('declined');
-      expect(params.title).toBe('Payment Failed');
-      expect(params.receiptFor).toBe('REF-3');
-      expect(params.details).toContain(`Response: ${code}`);
-    }
+  it('branches on the stated status, never on the code', () => {
+    // A 00 that is not stated APPROVED is not an approval; a 96 stated DECLINED is a decline.
+    expect(tapResultToParams(tap({ responseCode: '00', responseStatus: 'PENDING' }), 1).outcome).toBe('pending');
+    const declined = tapResultToParams(
+      tap({ responseCode: '96', responseStatus: 'DECLINED', merchantTransactionReference: 'REF-3' }),
+      100
+    );
+    expect(declined.outcome).toBe('declined');
+    expect(declined.title).toBe('Payment Declined');
+    expect(declined.receiptFor).toBe('REF-3');
+    expect(declined.details).toContain('Response: 96');
   });
 
-  it('falls back to the response code when status is absent, and vice versa', () => {
-    expect(tapResultToParams(tap({ responseCode: '00' }), 1).outcome).toBe('approved');
-    expect(tapResultToParams(tap({ status: 'APPROVED' }), 1).outcome).toBe('approved');
-    expect(tapResultToParams(tap({ status: 'PENDING' }), 1).outcome).toBe('pending');
-  });
-
-  it('renders a result with nothing but an amount when every field is null', () => {
-    const params = tapResultToParams(tap(), 500);
-
-    expect(params.outcome).toBe('declined');
-    expect(params.message).toBe('Transaction failed');
-    expect(params.details).toEqual([]); // no dangling "Response: null" line
+  it('shows a NOT_SENT tap with its reason, no receipt and nothing to wait for', () => {
+    const params = tapResultToParams(
+      tap({ responseStatus: 'NOT_SENT', responseStatusReason: 'NO_NETWORK_CONNECTION', message: 'No connection' }),
+      100
+    );
+    expect(params.outcome).toBe('not_sent');
+    expect(params.title).toBe('Payment Not Sent');
+    expect(params.message).toBe('No connection (NO_NETWORK_CONNECTION)');
     expect(params.receiptFor).toBeUndefined();
+    expect(params.resolvesFor).toBeUndefined();
+  });
+
+  it('a duplicate order says paid or still confirming — never retry', () => {
+    const paid = tapResultToParams(
+      tap({ responseCode: '94', responseStatus: 'FAILED', responseStatusReason: 'DUPLICATE_MERCHANT_ORDER_ID' }),
+      100
+    );
+    expect(paid.title).toBe('Order Already Used');
+    expect(paid.message).toBe('This order is already paid - do not take another payment');
+    const pending = tapResultToParams(
+      tap({
+        responseCode: '94',
+        responseStatus: 'FAILED',
+        responseStatusReason: 'DUPLICATE_MERCHANT_ORDER_ID',
+        originalPayment: {
+          responseCode: '09', responseStatus: 'PENDING', responseStatusReason: 'TRANSACTION_IN_PROCESS',
+          amountMinorUnits: 100, merchantTransactionReference: 'REF-ORIG', transactionId: 'TX-ORIG',
+        },
+      }),
+      100
+    );
+    expect(pending.message).toBe(
+      'A payment for this order is still being confirmed - do not take another payment'
+    );
+  });
+
+  it('treats an absent or unknown status as pending, never as a failure', () => {
+    expect(tapResultToParams(tap(), 500).outcome).toBe('pending');
+    expect(tapResultToParams(tap({ responseStatus: 'SETTLING' }), 500).outcome).toBe('pending');
   });
 });
 
@@ -183,6 +211,9 @@ describe('contextSettlementToParams', () => {
 describe('cpmChargeToParams', () => {
   const charge = (over: Partial<CustomerQrChargeOutcome> = {}): CustomerQrChargeOutcome => ({
     approved: true,
+    responseStatus: 'APPROVED',
+    responseStatusReason: null,
+    message: null,
     responseCode: '00',
     transactionId: 'TXN-9',
     merchantTransactionReference: 'REF-9',
@@ -190,6 +221,7 @@ describe('cpmChargeToParams', () => {
     merchantOrderId: null,
     creditTransactionId: null,
     isCreditConfirmationSupported: null,
+    originalPayment: null,
     ...over,
   });
 
@@ -206,7 +238,10 @@ describe('cpmChargeToParams', () => {
   });
 
   it('offers the receipt for a delivered decline too — it was recorded', () => {
-    const params = cpmChargeToParams(charge({ approved: false, responseCode: '05' }), 750);
+    const params = cpmChargeToParams(
+      charge({ approved: false, responseStatus: 'DECLINED', responseCode: '05' }),
+      750
+    );
     expect(params.outcome).toBe('declined');
     expect(params.receiptFor).toBe('REF-9');
     expect(params.message).toBe('Customer QR payment · 05');
@@ -218,15 +253,45 @@ describe('cpmChargeToParams', () => {
     ).toBeUndefined();
   });
 
-  it('offers no receipt for a transport failure — nothing was recorded', () => {
-    const params = cpmChargeFailureToParams('Network unreachable', 750);
-    expect(params.outcome).toBe('declined');
+  it('offers no receipt for a NOT_SENT charge — nothing was recorded', () => {
+    const params = cpmChargeToParams(
+      charge({
+        approved: false,
+        responseStatus: 'NOT_SENT',
+        responseStatusReason: 'NO_NETWORK_CONNECTION',
+        responseCode: null,
+        merchantTransactionReference: null,
+        message: 'No connection',
+      }),
+      750
+    );
+    expect(params.outcome).toBe('not_sent');
     expect(params.receiptFor).toBeUndefined();
-    expect(params.message).toBe('Network unreachable');
+    expect(params.message).toBe('No connection (NO_NETWORK_CONNECTION)');
   });
 
-  it('still says something when the failure carries an empty message', () => {
-    expect(cpmChargeFailureToParams('', 750).message).toBe('Payment failed');
+  it('a PENDING charge waits for the answer and offers no receipt yet', () => {
+    const params = cpmChargeToParams(
+      charge({ approved: false, responseStatus: 'PENDING', responseCode: '68' }),
+      750
+    );
+    expect(params.outcome).toBe('pending');
+    expect(params.receiptFor).toBeUndefined();
+    expect(params.resolvesFor).toBe('REF-9');
+  });
+
+  it('a duplicate order says it is already paid', () => {
+    const params = cpmChargeToParams(
+      charge({
+        approved: false,
+        responseStatus: 'FAILED',
+        responseStatusReason: 'DUPLICATE_MERCHANT_ORDER_ID',
+        responseCode: '94',
+      }),
+      750
+    );
+    expect(params.message).toBe(duplicateOrderMessage(null));
+    expect(params.receiptFor).toBeUndefined();
   });
 });
 
@@ -244,18 +309,25 @@ describe('walletPaymentToParams', () => {
 
   it('never offers a receipt — a wallet cannot fetch the merchant copy', () => {
     expect(walletPaymentToParams(outcome(), 300).receiptFor).toBeUndefined();
-    expect(walletPaymentFailureToParams('boom', 300).receiptFor).toBeUndefined();
   });
 
   it('tells the payer to add the card again when it is not bound to this phone', () => {
-    const params = walletPaymentFailureToParams('DEVICE_NOT_BOUND: refused', 300, 'DEVICE_NOT_BOUND');
-    expect(params.outcome).toBe('declined');
+    const params = walletPaymentToParams(
+      outcome({ approved: false, responseCode: null, responseStatus: 'NOT_SENT', responseStatusReason: 'DEVICE_NOT_BOUND' }),
+      300
+    );
+    expect(params.outcome).toBe('not_sent');
     expect(params.title).toBe(DEVICE_NOT_BOUND_TITLE);
     expect(params.message).toBe(DEVICE_NOT_BOUND_MESSAGE);
   });
 
-  it("keeps the SDK's message for every other failure", () => {
-    expect(walletPaymentFailureToParams('boom', 300, 'AUTH_FAILED').message).toBe('boom');
+  it('shows any other NOT_SENT with its reason', () => {
+    const params = walletPaymentToParams(
+      outcome({ approved: false, responseCode: null, responseStatus: 'NOT_SENT', responseStatusReason: 'AUTH_FAILED', message: 'boom' }),
+      300
+    );
+    expect(params.outcome).toBe('not_sent');
+    expect(params.message).toBe('boom (AUTH_FAILED)');
   });
 
   it("shows the gateway's merchant name and location", () => {

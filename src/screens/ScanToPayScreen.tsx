@@ -9,7 +9,7 @@ import {
   type ScanInspection,
 } from 'veyra-sdk-react-native';
 import type { RootStackParamList } from '../../App';
-import { walletPaymentFailureToParams, walletPaymentToParams } from '../paymentResult';
+import { walletPaymentToParams } from '../paymentResult';
 import { Scanner } from '../Scanner';
 import { theme } from '../theme';
 import { Button, formatAmount, Section } from '../ui';
@@ -40,6 +40,19 @@ export function ScanToPayScreen({
       // No authentication call: payScannedContext raises the device authentication sheet
       // itself, naming this merchant and amount. One gesture per attempt — a retry asks again.
       const outcome = await wallet.payScannedContext(inspection.handle);
+      if (outcome.responseStatus === 'NOT_SENT') {
+        // Never reached Veyra: nothing was paid, and the scanned QR can still be paid.
+        if (outcome.responseStatusReason === 'AUTH_CANCELLED') {
+          setBusy(false);
+          return; // the payer backed out of the authentication sheet — stay on the confirm screen
+        }
+        if (outcome.responseStatusReason === 'AUTH_UNAVAILABLE') {
+          // No biometric and no screen lock on this device: a retry cannot help, so say what will.
+          setBusy(false);
+          Alert.alert('Set up a screen lock', outcome.message ?? 'This phone has no screen lock.');
+          return;
+        }
+      }
       // Replace, not push: the confirm screen is spent, so backing out of the result
       // must not land on a scanned context that can no longer be paid.
       navigation.replace(
@@ -47,22 +60,9 @@ export function ScanToPayScreen({
         walletPaymentToParams(outcome, inspection.amountMinorUnits)
       );
     } catch (e) {
-      const err = e as VeyraError;
-      if (err.code === 'AUTH_CANCELLED') {
-        setBusy(false);
-        return; // user backed out of biometrics — stay on the confirm screen
-      }
-      if (err.code === 'AUTH_UNAVAILABLE') {
-        // No biometric and no screen lock on this device: a retry cannot help, so say what
-        // will — this is why it is a separate code from AUTH_FAILED.
-        setBusy(false);
-        Alert.alert('Set up a screen lock', err.message);
-        return;
-      }
-      navigation.replace(
-        'PaymentResult',
-        walletPaymentFailureToParams(err.message, inspection.amountMinorUnits, err.code)
-      );
+      // Only a setup mistake rejects.
+      setBusy(false);
+      Alert.alert('Cannot pay', (e as VeyraError).message);
     }
   };
 

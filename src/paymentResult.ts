@@ -1,6 +1,7 @@
 import type {
   CustomerQrChargeOutcome,
   MerchantTapResult,
+  OriginalPayment,
   PaymentContextStatus,
   PaymentOutcome,
 } from 'veyra-sdk-react-native';
@@ -11,7 +12,7 @@ import type {
  * result page. The mapping lives here rather than in the screens so each rail's outcome is
  * turned into the same shape in one place (and can be unit-tested without a renderer).
  */
-export type PaymentResultOutcome = 'approved' | 'declined' | 'pending';
+export type PaymentResultOutcome = 'approved' | 'declined' | 'pending' | 'not_sent';
 
 export interface PaymentResultParams {
   outcome: PaymentResultOutcome;
@@ -66,72 +67,117 @@ export const AUTO_RETURN_MS = 60000;
 const PENDING_MESSAGE =
   'Status unknown. The issuer may have approved. Check transactions for updates.';
 
+const NOT_SENT_DETAIL = 'Nothing was charged. Fix the reason and try again with the same order.';
+
+/** The refusal reason for an order id already on another payment. */
+export const DUPLICATE_MERCHANT_ORDER_ID = 'DUPLICATE_MERCHANT_ORDER_ID';
+
+/**
+ * What to tell the merchant when the order id is already on another payment, from that
+ * payment's status (`originalPayment`). Never "try again": the order is paid, or a payment for
+ * it is still being confirmed.
+ */
+export function duplicateOrderMessage(original: OriginalPayment | null | undefined): string {
+  return original?.responseStatus === 'PENDING'
+    ? 'A payment for this order is still being confirmed - do not take another payment'
+    : 'This order is already paid - do not take another payment';
+}
+
+/** The reason in brackets after a message, when there is one. */
+function withReason(message: string, reason: string | null | undefined): string {
+  return reason ? `${message} (${reason})` : message;
+}
+
 /** Drops nulls/empties so the screen never renders a dangling label. */
 function lines(...candidates: Array<string | null | undefined>): string[] {
   return candidates.filter((l): l is string => !!l);
 }
 
 /**
- * A contactless tap. Mirrors the native `handlePaymentResponse` split: `00` approved,
- * `99` pending (no receipt — the status can still change), everything else declined.
- * `status` is preferred when present; `responseCode` is the fallback, since one is
- * normalised from the other across platforms.
+ * A contactless tap. Branch on the status the SDK states, never on the response code:
+ * `APPROVED`, `DECLINED`, `FAILED`, `PENDING` (may have been charged — the SDK resolves it)
+ * and `NOT_SENT` (never reached the gateway — retry with the same order id).
  */
 export function tapResultToParams(
   result: MerchantTapResult,
   amountMinorUnits: number
 ): PaymentResultParams {
   const code = result.responseCode;
-  const approved = result.status === 'APPROVED' || code === '00';
-  const pending = !approved && (result.status === 'PENDING' || code === '99');
+  const reason = result.responseStatusReason;
   const reference = result.merchantTransactionReference ?? undefined;
 
-  if (approved) {
-    return {
-      outcome: 'approved',
-      title: 'Payment Successful',
-      message: result.message ?? 'Transaction approved',
-      amountMinorUnits,
-      details: lines(
-        result.cardScheme && `Card: ${result.cardScheme}`,
-        result.maskedTokenLast4 && `Card number: ${result.maskedTokenLast4}`,
-        reference && `Reference: ${reference}`
-      ),
-      receiptFor: reference,
-      // The approval said the merchant's bank supports credit confirmation — the result
-      // screen waits and flips from the onCreditConfirmation event.
-      creditConfirmation:
-        result.isCreditConfirmationSupported === true && reference
-          ? {
-              reference,
-              creditTransactionId: result.creditTransactionId,
-              supported: true,
-            }
-          : undefined,
-    };
+  switch (result.responseStatus) {
+    case 'APPROVED':
+      return {
+        outcome: 'approved',
+        title: 'Payment Successful',
+        message: result.message ?? 'Transaction approved',
+        amountMinorUnits,
+        details: lines(
+          result.cardScheme && `Card: ${result.cardScheme}`,
+          result.maskedTokenLast4 && `Card number: ${result.maskedTokenLast4}`,
+          reference && `Reference: ${reference}`
+        ),
+        receiptFor: reference,
+        // The approval said the merchant's bank supports credit confirmation — the result
+        // screen waits and flips from the onCreditConfirmation event.
+        creditConfirmation:
+          result.isCreditConfirmationSupported === true && reference
+            ? {
+                reference,
+                creditTransactionId: result.creditTransactionId,
+                supported: true,
+              }
+            : undefined,
+      };
+    case 'NOT_SENT':
+      // Never reached the gateway: nothing was charged or recorded, so no receipt.
+      return {
+        outcome: 'not_sent',
+        title: 'Payment Not Sent',
+        message: withReason(result.message ?? 'The payment was not sent', reason),
+        amountMinorUnits,
+        details: [NOT_SENT_DETAIL],
+      };
+    case 'DECLINED':
+      return {
+        outcome: 'declined',
+        title: 'Payment Declined',
+        message: withReason(result.message ?? 'Transaction declined', reason),
+        amountMinorUnits,
+        details: lines(code && `Response: ${code}`, reference && `Reference: ${reference}`),
+        receiptFor: reference,
+      };
+    case 'FAILED':
+      if (reason === DUPLICATE_MERCHANT_ORDER_ID) {
+        return {
+          outcome: 'declined',
+          title: 'Order Already Used',
+          message: duplicateOrderMessage(result.originalPayment),
+          amountMinorUnits,
+          details: lines(code && `Response: ${code}`),
+        };
+      }
+      return {
+        outcome: 'declined',
+        title: 'Payment Failed',
+        message: withReason(result.message ?? 'Transaction not completed', reason),
+        amountMinorUnits,
+        details: lines(code && `Response: ${code}`, reference && `Reference: ${reference}`),
+        receiptFor: reference,
+      };
+    default:
+      // PENDING, or a status newer than this app: unresolved, never a failure. No receipt —
+      // the SDK keeps polling and pushes the settlement; the screen watches this reference.
+      return {
+        outcome: 'pending',
+        title: 'Payment Pending',
+        message: result.message ?? PENDING_MESSAGE,
+        amountMinorUnits,
+        details: lines(PENDING_MESSAGE, reference && `Reference: ${reference}`),
+        resolvesFor: reference,
+      };
   }
-
-  if (pending) {
-    return {
-      outcome: 'pending',
-      title: 'Payment Pending',
-      message: result.message ?? PENDING_MESSAGE,
-      amountMinorUnits,
-      details: lines(PENDING_MESSAGE, reference && `Reference: ${reference}`),
-      // No receipt: the transaction is not final, so there is nothing to print yet. The SDK
-      // keeps polling it and pushes the settlement — the screen watches this reference.
-      resolvesFor: reference,
-    };
-  }
-
-  return {
-    outcome: 'declined',
-    title: 'Payment Failed',
-    message: result.message ?? 'Transaction failed',
-    amountMinorUnits,
-    details: lines(code && `Response: ${code}`, reference && `Reference: ${reference}`),
-    receiptFor: reference,
-  };
 }
 
 /**
@@ -159,48 +205,85 @@ export function contextSettlementToParams(
   };
 }
 
+/** Where a merchant QR or customer QR ended without a payment, as a result screen. */
+export function notSentToParams(
+  message: string | null,
+  reason: string | null,
+  amountMinorUnits: number
+): PaymentResultParams {
+  return {
+    outcome: 'not_sent',
+    title: 'Payment Not Sent',
+    message: withReason(message ?? 'The payment was not sent', reason),
+    amountMinorUnits,
+    details: [NOT_SENT_DETAIL],
+  };
+}
+
 /**
- * A scanned customer QR that reached the gateway. Approved *and* declined are both
- * recorded, so both offer the receipt; only a transport failure has none
- * ({@link cpmChargeFailureToParams}).
+ * A customer QR charge, by its stated status. Approved, declined and failed reached the
+ * gateway and are recorded, so they offer the receipt; `PENDING` is still being resolved and
+ * `NOT_SENT` never left the phone, so neither has one yet.
  */
 export function cpmChargeToParams(
   outcome: CustomerQrChargeOutcome,
   amountMinorUnits: number
 ): PaymentResultParams {
   const reference = outcome.merchantTransactionReference ?? undefined;
-  return {
-    outcome: outcome.approved ? 'approved' : 'declined',
-    title: outcome.approved ? 'Payment Successful' : 'Declined',
-    message: `Customer QR payment · ${outcome.responseCode ?? '-'}`,
-    amountMinorUnits,
-    details: lines(
-      outcome.transactionId && `Transaction: ${outcome.transactionId}`,
-      reference && `Reference: ${reference}`
-    ),
-    receiptFor: reference,
-    creditConfirmation:
-      outcome.approved && outcome.isCreditConfirmationSupported === true && reference
-        ? {
-            reference,
-            creditTransactionId: outcome.creditTransactionId,
-            supported: true,
-          }
-        : undefined,
-  };
-}
-
-/** The charge never reached a decision (network/transport) — nothing recorded, no receipt. */
-export function cpmChargeFailureToParams(
-  message: string,
-  amountMinorUnits: number
-): PaymentResultParams {
-  return {
-    outcome: 'declined',
-    title: 'Declined',
-    message: message || 'Payment failed',
-    amountMinorUnits,
-  };
+  const reason = outcome.responseStatusReason;
+  const details = lines(
+    outcome.transactionId && `Transaction: ${outcome.transactionId}`,
+    reference && `Reference: ${reference}`
+  );
+  switch (outcome.responseStatus) {
+    case 'APPROVED':
+      return {
+        outcome: 'approved',
+        title: 'Payment Successful',
+        message: `Customer QR payment · ${outcome.responseCode ?? '-'}`,
+        amountMinorUnits,
+        details,
+        receiptFor: reference,
+        creditConfirmation:
+          outcome.isCreditConfirmationSupported === true && reference
+            ? {
+                reference,
+                creditTransactionId: outcome.creditTransactionId,
+                supported: true,
+              }
+            : undefined,
+      };
+    case 'NOT_SENT':
+      return notSentToParams(outcome.message, reason, amountMinorUnits);
+    case 'DECLINED':
+    case 'FAILED':
+      if (reason === DUPLICATE_MERCHANT_ORDER_ID) {
+        return {
+          outcome: 'declined',
+          title: 'Order Already Used',
+          message: duplicateOrderMessage(outcome.originalPayment),
+          amountMinorUnits,
+        };
+      }
+      // A customer QR that reached the gateway is spent: a new attempt is a new scan.
+      return {
+        outcome: 'declined',
+        title: outcome.responseStatus === 'DECLINED' ? 'Declined' : 'Payment Failed',
+        message: withReason(`Customer QR payment · ${outcome.responseCode ?? '-'}`, reason),
+        amountMinorUnits,
+        details,
+        receiptFor: reference,
+      };
+    default:
+      return {
+        outcome: 'pending',
+        title: 'Payment Pending',
+        message: PENDING_MESSAGE,
+        amountMinorUnits,
+        details,
+        resolvesFor: reference,
+      };
+  }
 }
 
 /**
@@ -217,6 +300,25 @@ export function walletPaymentToParams(
   // they were refused when the SDK has stored the payment as unresolved and is still polling
   // for it. Anything not stated final is pending, exactly as the SDK records it.
   const stated = outcome.responseStatus?.trim().toUpperCase();
+  if (stated === 'NOT_SENT') {
+    // Never reached Veyra: nothing was paid. A card this phone cannot pay with gets the
+    // add-it-again advice; anything else says why and lets the payer try again.
+    if (outcome.responseStatusReason === 'DEVICE_NOT_BOUND') {
+      return {
+        outcome: 'not_sent',
+        title: DEVICE_NOT_BOUND_TITLE,
+        message: DEVICE_NOT_BOUND_MESSAGE,
+        amountMinorUnits,
+      };
+    }
+    return {
+      outcome: 'not_sent',
+      title: 'Payment Not Sent',
+      message: withReason(outcome.message ?? 'The payment was not sent', outcome.responseStatusReason),
+      amountMinorUnits,
+      details: ['Nothing was paid. Fix the reason and try again.'],
+    };
+  }
   const state: PaymentResultOutcome =
     stated === 'APPROVED'
       ? 'approved'
@@ -241,7 +343,6 @@ export function walletPaymentToParams(
   };
 }
 
-/** The payer's payment failed before an outcome existed (declined by the SDK, network…). */
 /**
  * What the payer is told when the backend will not give a card payment keys on this phone (it
  * was added on another device, or before the app was reinstalled). One wording on every rail:
@@ -250,24 +351,3 @@ export function walletPaymentToParams(
 export const DEVICE_NOT_BOUND_TITLE = "This card can't pay on this phone";
 export const DEVICE_NOT_BOUND_MESSAGE =
   'It was added on another device or before the app was reinstalled. Remove it and add it again on this phone.';
-
-export function walletPaymentFailureToParams(
-  message: string,
-  amountMinorUnits: number,
-  code?: string
-): PaymentResultParams {
-  if (code === 'DEVICE_NOT_BOUND') {
-    return {
-      outcome: 'declined',
-      title: DEVICE_NOT_BOUND_TITLE,
-      message: DEVICE_NOT_BOUND_MESSAGE,
-      amountMinorUnits,
-    };
-  }
-  return {
-    outcome: 'declined',
-    title: 'Declined',
-    message: message || 'Payment failed',
-    amountMinorUnits,
-  };
-}

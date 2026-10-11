@@ -20,6 +20,8 @@ const LOOK: Record<PaymentResultOutcome, { color: string; glyph: string; word: s
   approved: { color: theme.successGreen, glyph: '✓', word: 'Approved' },
   declined: { color: theme.errorRed, glyph: '✕', word: 'Declined' },
   pending: { color: theme.warningOrange, glyph: '⏱', word: 'Pending' },
+  // Never reached the gateway: nothing was charged, and a retry reuses the same order id.
+  not_sent: { color: theme.warningOrange, glyph: '↻', word: 'Not sent' },
 };
 
 /**

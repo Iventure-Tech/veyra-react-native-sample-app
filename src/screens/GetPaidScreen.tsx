@@ -7,12 +7,14 @@ import {
   merchant,
   useGetPaidSession,
   VeyraError,
+  type CancelResult,
   type MerchantTapEvent,
   type PaymentContextQr,
   type ResponseStatus,
   type ScannedCustomerQr,
 } from 'veyra-sdk-react-native';
 import type { RootStackParamList } from '../../App';
+import { CANNOT_CANCEL_MESSAGE, cancelAction, cancelRefusedTooLate, isCancelledOutcome } from '../cancel';
 import {
   contextSettlementToParams,
   cpmChargeToParams,
@@ -25,7 +27,7 @@ import { Scanner } from '../Scanner';
 import { theme } from '../theme';
 import { QrTile, Busy, Button, Field, formatAmount, FormScrollView, Section } from '../ui';
 
-type Rail = 'idle' | 'tap' | 'mpm' | 'cpmScan' | 'cpmConfirm' | 'cpmCharging';
+type Rail = 'idle' | 'tap' | 'mpmCreating' | 'mpm' | 'cpmScan' | 'cpmConfirm' | 'cpmCharging';
 
 /**
  * A stand-in for the till's own order/basket/invoice id, which a real integration would take
@@ -57,7 +59,9 @@ export function GetPaidScreen({
   const [amount, setAmount] = useState('1000');
   const [rail, setRail] = useState<Rail>('idle');
   const [hint, setHint] = useState<string | null>(null);
-  const [tapSessionId, setTapSessionId] = useState<string | null>(null);
+  // Set once a cancel was answered TOO_LATE_TO_CANCEL_REQUEST_ALREADY_SENT: the payment has left the
+  // device, so Cancel is gone and the screen just waits for the result.
+  const [cancelRefused, setCancelRefused] = useState(false);
   const [mpmQr, setMpmQr] = useState<PaymentContextQr | null>(null);
   const [mpmState, setMpmState] = useState<string | null>(null);
   const [mpmExpired, setMpmExpired] = useState(false);
@@ -70,6 +74,9 @@ export function GetPaidScreen({
   // The order id kept for a retry after a NOT_SENT outcome; null means the next sale gets a new one.
   const retryOrderIdRef = useRef<string | null>(null);
   const currentOrderIdRef = useRef<string | null>(null);
+  // The order id of the payment running right now (tap armed, QR being created, charge in flight);
+  // null once its outcome has arrived. Cancel and leaving the screen name the payment by it.
+  const inFlightOrderIdRef = useRef<string | null>(null);
 
   /** The order id for this attempt: the unused one after NOT_SENT, otherwise a new one. */
   const orderIdForAttempt = (): string => {
@@ -95,6 +102,13 @@ export function GetPaidScreen({
         .getStored()
         .then((m) => setMerchantStatus(m?.merchantStatus ?? null))
         .catch(() => {});
+      // Leaving the screen with a payment still on the device cancels it, by its order id. One
+      // already sent answers TOO_LATE_TO_CANCEL_REQUEST_ALREADY_SENT and runs to its normal result,
+      // which lands in Transactions.
+      return () => {
+        const orderId = inFlightOrderIdRef.current;
+        if (orderId) merchant.cancelPayment(orderId).catch(() => {});
+      };
     }, [])
   );
 
@@ -117,14 +131,18 @@ export function GetPaidScreen({
         case 'ended':
           setRail('idle');
           setHint(null);
+          setCancelRefused(false);
+          inFlightOrderIdRef.current = null;
           break;
         case 'result':
           setRail('idle');
-          setTapSessionId(null);
           setHint(null);
+          setCancelRefused(false);
+          inFlightOrderIdRef.current = null;
           attemptEnded(e.result.responseStatus);
-          // Your own cancel is not a result.
-          if (e.result.responseStatus === 'NOT_SENT' && e.result.responseStatusReason === 'CANCELLED') {
+          // Your own cancel is not a result: nothing was sent, so just go back to amount entry. The
+          // order id stays usable (NOT_SENT), so the next attempt reuses it.
+          if (isCancelledOutcome(e.result)) {
             break;
           }
           if (e.result.responseStatus === 'APPROVED' && e.result.merchantTransactionReference) {
@@ -175,33 +193,73 @@ export function GetPaidScreen({
   const startTap = async () => {
     if (!requireActive()) return;
     try {
-      const { sessionId } = await merchant.tap.start({
-        amountMinorUnits: minorUnits,
-        // Your own order id — required, echoed back, unique across the merchant's payments.
-        merchantOrderId: orderIdForAttempt(),
-      });
+      // Your own order id — required, echoed back, unique across the merchant's payments. It is
+      // also how this payment is cancelled: merchant.cancelPayment(orderId).
+      const orderId = orderIdForAttempt();
+      inFlightOrderIdRef.current = orderId;
+      setCancelRefused(false);
+      await merchant.tap.start({ amountMinorUnits: minorUnits, merchantOrderId: orderId });
       chargedRef.current = minorUnits;
-      setTapSessionId(sessionId);
       setRail('tap');
       setHint('Ask the customer to tap their phone or card');
     } catch (e) {
       // Only a setup mistake rejects; a refusal (blank order id, the other mode busy) arrives as
       // a NOT_SENT `result` event.
+      inFlightOrderIdRef.current = null;
       Alert.alert('Cannot start', (e as VeyraError).message);
     }
   };
 
-  const cancelTap = async () => {
-    if (tapSessionId) await merchant.tap.cancel(tapSessionId).catch(() => {});
-    setRail('idle');
-    setHint(null);
+  /**
+   * Cancel names the payment by the order id it was started with — the same call for the tap, the
+   * MPM QR create and the customer-QR charge. A payment can be cancelled only while it is still on
+   * the device (waiting for a tap, reading the card, the moment between the read and the send,
+   * authentication); once sent it runs to its normal result.
+   */
+  const cancelPayment = async () => {
+    const orderId = inFlightOrderIdRef.current;
+    if (!orderId) {
+      setRail('idle');
+      setHint(null);
+      return;
+    }
+    let answer: CancelResult;
+    try {
+      answer = await merchant.cancelPayment(orderId);
+    } catch (e) {
+      // Only a setup mistake rejects.
+      Alert.alert('Cannot cancel', (e as VeyraError).message);
+      return;
+    }
+    if (cancelRefusedTooLate(answer)) {
+      // Already with the bank: say so and keep waiting for the result this payment still delivers.
+      setCancelRefused(true);
+    }
+    if (cancelAction(answer) === 'LEAVE') {
+      // Nothing in progress under that order id: just go back.
+      inFlightOrderIdRef.current = null;
+      setRail('idle');
+      setHint(null);
+    }
+    // CANCELLED: the payment's own NOT_SENT / CANCELLED outcome takes the screen back.
   };
 
   const showMpmQr = async () => {
     if (!requireActive()) return;
+    const orderId = orderIdForAttempt();
+    inFlightOrderIdRef.current = orderId;
+    setCancelRefused(false);
+    setRail('mpmCreating');
     try {
-      const qr = await merchant.createPaymentContext(minorUnits, undefined, orderIdForAttempt());
+      const qr = await merchant.createPaymentContext(minorUnits, undefined, orderId);
+      inFlightOrderIdRef.current = null;
+      setCancelRefused(false);
       attemptEnded(qr.responseStatus);
+      // Cancelled before it was sent: no QR, nothing recorded — back to amount entry.
+      if (isCancelledOutcome(qr)) {
+        setRail('idle');
+        return;
+      }
       // Creating the QR ends with an outcome: render it only when it was made.
       if (qr.responseStatus !== 'APPROVED' || !qr.txRef || !qr.mpmPayload) {
         if (qr.responseStatus === 'NOT_SENT') {
@@ -215,6 +273,7 @@ export function GetPaidScreen({
             `${qr.message ?? 'No payment code was created'} (${qr.responseStatusReason ?? qr.responseStatus})`
           );
         }
+        setRail('idle');
         return;
       }
       const txRef = qr.txRef;
@@ -250,6 +309,8 @@ export function GetPaidScreen({
       }, 2000);
     } catch (e) {
       // Only a setup mistake rejects.
+      inFlightOrderIdRef.current = null;
+      setRail('idle');
       Alert.alert('Cannot create QR', (e as VeyraError).message);
     }
   };
@@ -284,13 +345,18 @@ export function GetPaidScreen({
     const charged = cpm.amountMinorUnits; // the amount rides in the customer's QR
     // Stay on a visible processing state for the whole round trip — dropping back to
     // the idle screen here reads as the payment having vanished.
+    const orderId = orderIdForAttempt();
+    inFlightOrderIdRef.current = orderId;
+    setCancelRefused(false);
     setRail('cpmCharging');
     try {
       // The second argument is *your* order/basket/invoice id — required, and unique across the
       // merchant's payments (reused only to retry a NOT_SENT outcome). The transaction reference
       // is minted by the SDK and comes back on the outcome; never invent one.
-      const outcome = await merchant.chargeCustomerQr(cpm.handle, orderIdForAttempt());
+      const outcome = await merchant.chargeCustomerQr(cpm.handle, orderId);
       attemptEnded(outcome.responseStatus);
+      // Cancelled before it was sent: nothing was charged — back to amount entry, no result page.
+      if (isCancelledOutcome(outcome)) return;
       if (outcome.responseStatus === 'APPROVED' && outcome.merchantTransactionReference) {
         setLastApprovedRef(outcome.merchantTransactionReference);
       }
@@ -299,6 +365,8 @@ export function GetPaidScreen({
       // Only a setup mistake rejects.
       Alert.alert('Cannot charge', (e as VeyraError).message);
     } finally {
+      inFlightOrderIdRef.current = null;
+      setCancelRefused(false);
       setCpm(null);
       setRail('idle');
     }
@@ -355,7 +423,22 @@ export function GetPaidScreen({
       {rail === 'tap' && (
         <Section title={`Waiting for tap — ${formatAmount(minorUnits)}`}>
           <Busy label={hint ?? 'Ready for tap'} />
-          <Button title="Cancel" destructive onPress={cancelTap} />
+          {cancelRefused ? (
+            <Text style={styles.body}>{CANNOT_CANCEL_MESSAGE} — waiting for the result.</Text>
+          ) : (
+            <Button title="Cancel" destructive onPress={cancelPayment} />
+          )}
+        </Section>
+      )}
+
+      {rail === 'mpmCreating' && (
+        <Section title={`Creating payment QR — ${formatAmount(minorUnits)}`}>
+          <Busy label="Creating the code…" />
+          {cancelRefused ? (
+            <Text style={styles.body}>{CANNOT_CANCEL_MESSAGE} — waiting for the result.</Text>
+          ) : (
+            <Button title="Cancel" destructive onPress={cancelPayment} />
+          )}
         </Section>
       )}
 
@@ -392,6 +475,11 @@ export function GetPaidScreen({
         <Section title={`Charging — ${formatAmount(cpm.amountMinorUnits)}`}>
           <Busy label="Processing payment…" />
           <Text style={styles.body}>Contacting the bank — keep this screen open.</Text>
+          {cancelRefused ? (
+            <Text style={styles.body}>{CANNOT_CANCEL_MESSAGE} — waiting for the result.</Text>
+          ) : (
+            <Button title="Cancel" destructive onPress={cancelPayment} />
+          )}
         </Section>
       )}
     </FormScrollView>

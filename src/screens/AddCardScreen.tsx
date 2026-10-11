@@ -5,10 +5,12 @@ import {
   wallet,
   VeyraError,
   type ActivationMethodInfo,
+  type CancelResult,
   type Bank,
 } from 'veyra-sdk-react-native';
 import type { RootStackParamList } from '../../App';
 import { SAMPLE_ACCOUNT } from '../../veyra.config';
+import { CANNOT_CANCEL_MESSAGE, cancelAction, cancelRefusedTooLate, isCancelledOutcome, newClientRequestId } from '../cancel';
 import { useSession } from '../session';
 import { theme } from '../theme';
 import { Busy, Button, Field, FormScrollView, Section } from '../ui';
@@ -37,6 +39,10 @@ export function AddCardScreen({
   const [methods, setMethods] = useState<ActivationMethodInfo[]>([]);
   const [code, setCode] = useState('');
   const observedRef = useRef<string | null>(null);
+  // The clientRequestId of the digitise running right now (null when none is). It is what Cancel
+  // names: wallet.cancelDigitise(clientRequestId).
+  const [digitiseRequestId, setDigitiseRequestId] = useState<string | null>(null);
+  const [cancelRefused, setCancelRefused] = useState(false);
 
   useEffect(() => {
     wallet
@@ -125,20 +131,37 @@ export function AddCardScreen({
         return;
       }
 
-      const result = await wallet.digitise({
-        accountNumber: form.accountNumber,
-        institutionCode: form.institutionCode,
-        accountHolderName,
-        walletAccountId: email,
-        emailAddress: email,
-        recommendation: 'APPROVE', // your app's own risk decision — never hardcode in production
-        consumerIdentifier: customerId,
-        bvn,
-        accountHolderAddress: form.accountHolderAddress,
-        mobileNumber: form.mobileNumber,
-        accountNumberSource: 'MANUAL',
-        bankName: bankName ?? banks.find((b) => b.institutionCode === form.institutionCode)?.name,
-      });
+      // A fresh reference for this attempt, so it can be cancelled while it is still on the device.
+      // Without one the SDK generates its own and the attempt cannot be cancelled.
+      const clientRequestId = newClientRequestId();
+      setCancelRefused(false);
+      setDigitiseRequestId(clientRequestId);
+      let result: Awaited<ReturnType<typeof wallet.digitise>>;
+      try {
+        result = await wallet.digitise({
+          accountNumber: form.accountNumber,
+          institutionCode: form.institutionCode,
+          accountHolderName,
+          walletAccountId: email,
+          emailAddress: email,
+          recommendation: 'APPROVE', // your app's own risk decision — never hardcode in production
+          consumerIdentifier: customerId,
+          bvn,
+          accountHolderAddress: form.accountHolderAddress,
+          mobileNumber: form.mobileNumber,
+          accountNumberSource: 'MANUAL',
+          bankName: bankName ?? banks.find((b) => b.institutionCode === form.institutionCode)?.name,
+          clientRequestId,
+        });
+      } finally {
+        setDigitiseRequestId(null);
+        setCancelRefused(false);
+      }
+      // Cancelled before it was sent: nothing was added — close the screen, nothing to explain.
+      if (isCancelledOutcome(result)) {
+        navigation.goBack();
+        return;
+      }
       if (!result.isApproved && !result.requiresActivation) {
         // Digitise is never PENDING: DECLINED, FAILED, or NOT_SENT (never reached Veyra — retry as is).
         Alert.alert(
@@ -161,6 +184,36 @@ export function AddCardScreen({
       Alert.alert('Add card failed', (e as VeyraError).message);
       setStep('form');
     }
+  };
+
+  /**
+   * Cancel names the digitise by its clientRequestId. It can be cancelled only while still on the
+   * device (attestation, before the request is sent); once sent it runs to its normal result.
+   */
+  const cancelDigitise = async () => {
+    // Before the digitise has started (the eligibility check) there is nothing to cancel: just close.
+    if (!digitiseRequestId) {
+      navigation.goBack();
+      return;
+    }
+    let answer: CancelResult;
+    try {
+      answer = await wallet.cancelDigitise(digitiseRequestId);
+    } catch (e) {
+      // Only a setup mistake rejects.
+      Alert.alert('Cannot cancel', (e as VeyraError).message);
+      return;
+    }
+    if (cancelRefusedTooLate(answer)) {
+      // Already with the bank: say so and keep waiting for the result the digitise still delivers.
+      setCancelRefused(true);
+    }
+    if (cancelAction(answer) === 'LEAVE') {
+      // No digitise under that id is running any more: just close.
+      setDigitiseRequestId(null);
+      navigation.goBack();
+    }
+    // CANCELLED: the digitise's own NOT_SENT / CANCELLED outcome takes the screen back.
   };
 
   const requestCode = async (method: ActivationMethodInfo) => {
@@ -237,7 +290,13 @@ export function AddCardScreen({
         </Section>
       )}
 
-      {step === 'digitising' && <Busy label="Checking eligibility and adding your card…" />}
+      {step === 'digitising' && (
+        <Section title="Adding your card">
+          <Busy label="Checking eligibility and adding your card…" />
+          {!cancelRefused && <Button title="Cancel" destructive onPress={cancelDigitise} />}
+          {cancelRefused && <Text style={styles.body}>{CANNOT_CANCEL_MESSAGE} — waiting for the result.</Text>}
+        </Section>
+      )}
 
       {step === 'chooseMethod' && (
         <Section title="Verify it's you">

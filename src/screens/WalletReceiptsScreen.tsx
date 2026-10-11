@@ -28,11 +28,17 @@ export function WalletReceiptsScreen(): React.JSX.Element {
     try {
       // Verifies the receipt's signature and stores it (cross-checked against the
       // matching wallet transaction when one exists).
-      const receipt = await wallet.processReceipt(payload);
+      const scan = await wallet.processReceipt(payload);
       setScanning(false);
-      setDetail(receipt);
+      // An answer, not a rejection: APPROVED with the stored receipt, or FAILED with the reason.
+      if (scan.responseStatus !== 'APPROVED' || !scan.receipt) {
+        Alert.alert('Receipt rejected', `${scan.message ?? 'Not a receipt from this wallet'} (${scan.responseStatusReason ?? scan.responseStatus})`);
+        return;
+      }
+      setDetail(scan.receipt);
       setReceipts(await wallet.getReceipts().catch(() => receipts ?? []));
     } catch (e) {
+      // Only a setup error rejects.
       setScanning(false);
       Alert.alert('Receipt rejected', (e as VeyraError).message);
     } finally {

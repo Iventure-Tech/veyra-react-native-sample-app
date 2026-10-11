@@ -274,7 +274,7 @@ a fallback from one to the other.
 **`providerType` says which kind it is.** A JavaScript object can't inherit a default, so you write
 it out; the SDK checks it against the functions your object has.
 
-- **An unusable provider rejects `Veyra.initialize` with `VALIDATION`, naming the problem**: no
+- **An unusable provider rejects `Veyra.initialize` with `INVALID_CONFIGURATION`, naming the problem**: no
   provider; an object with both `assertion` and the request functions; a `providerType` that
   contradicts the functions present (e.g. `'AUTHENTICATION'` with `post`/`get`/…); a blank
   `clientId`; a missing function (e.g. `provider.send is required (VeyraProxyProvider)`) — never
@@ -550,8 +550,8 @@ All methods return promises; all failures are typed `VeyraError`s.
 (activation needed — `activationMethods` lists the OTP channels), or `'DECLINED'`. Any other
 code — including none at all — means this SDK version cannot interpret the answer: the token is
 **discarded** (nothing provisioned, no card added, even if the response carried full token data)
-and the call fails with a message beginning `UNRECOGNISED_RESPONSE_CODE:`. Offer a retry, and
-update the SDK if it persists.
+and the call resolves `FAILED` with reason `UNRECOGNISED_RESPONSE_CODE` (§9.2, Table A). Start a
+new add-card, and update the SDK if it persists.
 iOS-only param: `bankName` (shown on the stored card). Android additionally requires
 `consumerIdentifier`, `bvn`, `accountHolderAddress`, `mobileNumber`.
 
@@ -1230,15 +1230,16 @@ integration. Do not build user-facing screens for them, and do not offer the use
 
 | `VeyraError.code` | When it happens | Fix |
 |---|---|---|
-| `NOT_CONFIGURED` | a call is made before `Veyra.initialize` | initialise the SDK first, at app start (§4) |
-| `NOT_SIGNED_IN` | a call is made after `Veyra.signOut()`, with no customer | call `Veyra.initialize` with the customer's `customerId` before using the SDK (§4.1) |
-| `VALIDATION` (`field`) | `Veyra.initialize` was given a configuration it can't use — a provider it can't use (`field` is `'provider'`), a provider of a different kind from an earlier `initialize` in this app process, or a missing `customerId` / environment / `appleTeamId` | pass a valid configuration; the message names the problem (§4.2) |
-| `SESSION_REQUIRED` | a payment method was called without the payment-screen session open | mount `usePaySession` / `useGetPaidSession` on the payment screen (§5) |
-| `UNSUPPORTED_ON_PLATFORM` | the method doesn't exist on this platform — e.g. wallet tap-to-pay on iOS | don't call it on this platform (§10) |
+| `NOT_CONFIGURED` | any call before `Veyra.initialize`, including — on Android — a call made before an Activity is attached ("no Activity attached") | initialise the SDK first, at app start, and call the SDK only once the app is on screen (§4) |
+| `NOT_SIGNED_IN` | no customer: a call made after `Veyra.signOut()` | call `Veyra.initialize` with the customer's `customerId` before using the SDK (§4.1) |
+| `INVALID_CONFIGURATION` | `Veyra.initialize` was given a configuration it can't use: an unusable provider; a provider of a different kind from an earlier `initialize` in this app process; a blank `customerId`; missing required config (environment, payment app provider ID, token requestor ID, recommendation standard version, and `appleTeamId` on iOS) | pass a valid configuration; the message names the exact problem (§4.2) |
+| `SESSION_REQUIRED` | a payment call without its screen session — `merchant.tap.*` without `useGetPaidSession`, `wallet.setActiveCard` without `usePaySession`. The same calls are gated on Android and iOS | mount the session hook on the payment screen (§5) |
+| `UNSUPPORTED_ON_PLATFORM` | a method this platform can't perform — e.g. wallet tap-to-pay on iOS raises it instead of doing nothing | don't call it on this platform (§10) |
 
-Two more codes guard `wallet.showQrToPay` the same way: `NO_ACTIVE_CARD` (no card is set active —
-select a payable card first) and `CARD_CANNOT_SHOW_QR` (the active card was added before it could
-show a payment QR — re-add it). Gate the button on the card instead of handling these at runtime.
+Two things that are **not** thrown, though they stop a call: a bad call argument (a blank
+`merchantOrderId`, an amount ≤ 0) resolves `NOT_SENT` / `INVALID_REQUEST`, and the other mode's
+payment being in flight resolves `NOT_SENT` / `MODE_REFUSED` (Table A).
+
 `UNKNOWN` is a rejection the bridge could not classify: log it and report it.
 
 **A cancel answer is not an error.** `TOO_LATE_TO_CANCEL_REQUEST_ALREADY_SENT` and
@@ -1251,13 +1252,14 @@ not the outcome of the original call. That call still ends with its own outcome.
 class VeyraError extends Error {
   code: VeyraErrorCode;          // the stable, typed code above — branch on this
   nativeErrorCode: string | null;// the platform's own error name, when there is one (Android)
-  field: string | null;          // the offending parameter, for code === 'VALIDATION'
+  field: string | null;          // not set by any setup error — read the message
 }
 ```
 
-`code` is the contract. `nativeErrorCode` and `field` are **diagnostics**: log them, show them in a
-support screen, but never branch on them — the same `code` can arrive with different native codes on
-Android and iOS. On iOS `nativeErrorCode` is usually `null`.
+`code` is the contract. `nativeErrorCode` is a **diagnostic**: log it, show it in a support
+screen, but never branch on it — the same `code` can arrive with different native codes on
+Android and iOS. On iOS `nativeErrorCode` is usually `null`. `field` stays on the type, but no
+setup error sets it: the message names the problem.
 
 ### 9.2 Processing outcomes — returned as the response triple
 
@@ -1377,12 +1379,14 @@ Some calls are not payment outcomes and have their own vocabularies:
 | `NOT_SENT` | — | `MERCHANT_PROFILE_INCOMPLETE` | the merchant's account details are missing | finish merchant setup |
 | `NOT_SENT` | — | `MISSING_MANDATORY_CONFIG` | terminal / merchant config is missing | register the merchant / pass the config |
 | `NOT_SENT` | — | `MODE_REFUSED` | the other mode's payment is in progress | wait for it to finish |
-| `NOT_SENT` | — | `UNRECOGNISED_RESPONSE_CODE` | add-card was answered with a code this SDK version doesn't know; nothing was stored | retry; update the SDK if it persists |
+| `NOT_SENT` | — | `NO_ACTIVE_CARD` | wallet: no card is set as active (e.g. `wallet.showQrToPay`) | ask the user to choose a card |
+| `NOT_SENT` | — | `CARD_CANNOT_SHOW_QR` | wallet: the active card can't produce a QR | use another card or tap |
 | `NOT_SENT` | — | `SDK_INTERNAL_ERROR` | the SDK failed before sending | report to support; retry is safe |
 | `PENDING` | `68` | `NO_RESPONSE_RECEIVED` | the request was sent but no answer came back (timeout, connection lost) | wait; the SDK resolves it |
 | `PENDING` | `06` | `UPSTREAM_ERROR` | Veyra answered with an error or something unreadable | wait; the SDK resolves it |
 | `PENDING` | — | `SDK_INTERNAL_ERROR` | the SDK failed after sending | wait; the SDK still resolves the payment |
 | `FAILED` | — | `NO_RESPONSE_RECEIVED` / `UPSTREAM_ERROR` | **add-card only**: no answer after sending | start a new digitisation |
+| `FAILED` | — | `UNRECOGNISED_RESPONSE_CODE` | **add-card only**: the Veyra token service answered with a code this SDK version doesn't know; the card was discarded, nothing stored | start a new add-card; update the SDK if it persists |
 
 **`NO_NETWORK_CONNECTION` vs `SDK_UNABLE_TO_CONNECT` vs `ONLINE_REQUIRED`.** All three end with
 "get online", and they need different copy:
@@ -1434,9 +1438,9 @@ every status lookup. One code always means one reason.
 |---|---|---|---|---|
 | `00` | `APPROVED` | `APPROVED` | approved | complete |
 | `05` | `DECLINED` | `DO_NOT_HONOR` | the bank refused without a specific reason | show it; another payment method |
-| `07` | `DECLINED` | `ACCOUNT_VALIDATION_FAILED` | the account could not be validated | show it |
+| `07` | `FAILED` | `ACCOUNT_VALIDATION_FAILED` | the beneficiary account failed validation before any transfer was made; nothing was dispatched | check the merchant's account details; retry with a new order ID |
 | `14` | `DECLINED` | `INVALID_TOKEN` | the card token is not valid | the customer should re-add the card |
-| `21` | `DECLINED` | `NAME_ENQUIRY_FAILED` | the beneficiary account lookup failed | check the merchant's account details |
+| `21` | `FAILED` | `NAME_ENQUIRY_FAILED` | the beneficiary account lookup could not be completed; nothing was dispatched | retry with a new order ID |
 | `51` | `DECLINED` | `INSUFFICIENT_FUNDS` | not enough funds | another payment method |
 | `54` | `DECLINED` | `EXPIRED_CARD_OR_TOKEN` | the card or token has expired | re-add the card |
 | `58` | `DECLINED` | `DOMAIN_RESTRICTION_FAILED` | the card can't be used this way (wrong channel / domain) | another payment method |

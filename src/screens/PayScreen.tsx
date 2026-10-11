@@ -81,7 +81,9 @@ export function PayScreen({
     if (!focused || !activeId || activeId === armedId) return;
     wallet
       .setActiveCard(activeId)
-      .then(() => setArmedId(activeId))
+      .then((selection) => {
+        if (selection.responseStatus === 'APPROVED') setArmedId(activeId);
+      })
       .catch(() => {});
   }, [focused, activeId, armedId]);
 
@@ -234,10 +236,17 @@ export function PayScreen({
   const selectCard = async (card: Card) => {
     try {
       // Android: arms tap-to-pay for this card (needs the pay session — mounted above).
-      await wallet.setActiveCard(card.id);
+      const selection = await wallet.setActiveCard(card.id);
+      // An answer: FAILED / CARD_NOT_FOUND (gone from this wallet) or CARD_DATA_MISSING (add it again).
+      if (selection.responseStatus !== 'APPROVED') {
+        Alert.alert('Cannot select card', `${selection.message ?? 'This card cannot be selected'} (${selection.responseStatusReason ?? selection.responseStatus})`);
+        reload();
+        return;
+      }
       setActiveId(card.id);
       setArmedId(card.id);
     } catch (e) {
+      // Only a setup error rejects.
       Alert.alert('Cannot select card', (e as Error).message);
     }
   };

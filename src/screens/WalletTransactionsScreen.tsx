@@ -198,10 +198,16 @@ export function WalletTransactionsScreen({
     setBusy(true);
     try {
       // Bound verification: a receipt for any OTHER transaction is rejected.
-      const r = await wallet.processReceipt(payload, scanningFor);
+      const scan = await wallet.processReceipt(payload, scanningFor);
       setScanningFor(null);
-      setReceipt(r);
+      // An answer, not a rejection: APPROVED with the stored receipt, or FAILED with the reason.
+      if (scan.responseStatus !== 'APPROVED' || !scan.receipt) {
+        Alert.alert('Receipt rejected', `${scan.message ?? 'Not a receipt for this payment'} (${scan.responseStatusReason ?? scan.responseStatus})`);
+        return;
+      }
+      setReceipt(scan.receipt);
     } catch (e) {
+      // Only a setup error rejects.
       setScanningFor(null);
       Alert.alert('Receipt rejected', (e as VeyraError).message);
     } finally {

@@ -33,7 +33,8 @@ type Rail = 'idle' | 'tap' | 'mpm' | 'cpmScan' | 'cpmConfirm' | 'cpmCharging';
  *
  * Required, and unique per merchant: the gateway refuses a reused one with
  * `DUPLICATE_MERCHANT_ORDER_ID`. The retry rule: an outcome that never reached the gateway
- * (`NOT_SENT`) leaves the order id unused, so the retry reuses it; any other outcome used it up,
+ * (`NOT_SENT`), or that the gateway did not send to the bank (`RETRY`), leaves the order id
+ * usable, so the retry reuses it; any other outcome used it up,
  * so the next attempt gets a new one. The reference itself is the SDK's to mint and arrives on
  * the outcome.
  */
@@ -80,7 +81,9 @@ export function GetPaidScreen({
 
   /** After an outcome: keep the order id only when the payment never reached the gateway. */
   const attemptEnded = (status: ResponseStatus | null | undefined) => {
-    retryOrderIdRef.current = status === 'NOT_SENT' ? currentOrderIdRef.current : null;
+    // NOT_SENT (never reached the gateway) and RETRY (the gateway did not send it to the bank) both
+    // leave the order id usable.
+    retryOrderIdRef.current = status === 'NOT_SENT' || status === 'RETRY' ? currentOrderIdRef.current : null;
   };
 
   const active = merchantStatus === null || merchantStatus === 'ACTIVE';

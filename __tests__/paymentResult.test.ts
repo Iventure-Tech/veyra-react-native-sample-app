@@ -402,3 +402,26 @@ describe('walletPaymentToParams', () => {
     expect(unknown.outcome).toBe('pending');
   });
 });
+
+describe('RETRY', () => {
+  it('a RETRY tap reads as not sent, with its code, no receipt and nothing to wait for', () => {
+    const params = tapResultToParams(
+      tap({ responseCode: '91', responseStatus: 'RETRY', responseStatusReason: 'ISSUER_SWITCH_NOT_AVAILABLE', merchantTransactionReference: 'REF-R' }),
+      100
+    );
+    expect(params.outcome).toBe('not_sent');
+    expect(params.message).toBe('Payment not sent to the bank - retry with the same order ID (ISSUER_SWITCH_NOT_AVAILABLE)');
+    expect(params.details).toContain('Response: 91');
+    expect(params.receiptFor).toBeUndefined();
+    expect(params.resolvesFor).toBeUndefined();
+  });
+
+  it('a RETRY scan-to-pay is not pending', () => {
+    const params = walletPaymentToParams(
+      { approved: false, responseCode: '30', responseStatus: 'RETRY', responseStatusReason: 'INVALID_REQUEST', message: null, merchantName: null, merchantLocation: null },
+      300
+    );
+    expect(params.outcome).toBe('not_sent');
+  });
+});
+

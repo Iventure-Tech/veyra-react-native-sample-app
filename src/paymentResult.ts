@@ -68,6 +68,7 @@ const PENDING_MESSAGE =
   'Status unknown. The issuer may have approved. Check transactions for updates.';
 
 const NOT_SENT_DETAIL = 'Nothing was charged. Fix the reason and try again with the same order.';
+const RETRY_MESSAGE = 'Payment not sent to the bank - retry with the same order ID';
 
 /** The refusal reason for an order id already on another payment. */
 export const DUPLICATE_MERCHANT_ORDER_ID = 'DUPLICATE_MERCHANT_ORDER_ID';
@@ -139,6 +140,10 @@ export function tapResultToParams(
         amountMinorUnits,
         details: [NOT_SENT_DETAIL],
       };
+    case 'RETRY':
+      // Reached the gateway, which did not send it to the bank: nothing was charged, and the
+      // same order id can be used again. Recorded, but there is no payment to print a receipt for.
+      return retryToParams(code, reason, amountMinorUnits);
     case 'DECLINED':
       return {
         outcome: 'declined',
@@ -205,6 +210,21 @@ export function contextSettlementToParams(
   };
 }
 
+/** A RETRY outcome: the gateway received it and did not send it to the bank. */
+export function retryToParams(
+  code: string | null,
+  reason: string | null,
+  amountMinorUnits: number
+): PaymentResultParams {
+  return {
+    outcome: 'not_sent',
+    title: 'Payment Not Sent',
+    message: withReason(RETRY_MESSAGE, reason),
+    amountMinorUnits,
+    details: lines(code && `Response: ${code}`, NOT_SENT_DETAIL),
+  };
+}
+
 /** Where a merchant QR or customer QR ended without a payment, as a result screen. */
 export function notSentToParams(
   message: string | null,
@@ -255,6 +275,8 @@ export function cpmChargeToParams(
       };
     case 'NOT_SENT':
       return notSentToParams(outcome.message, reason, amountMinorUnits);
+    case 'RETRY':
+      return retryToParams(outcome.responseCode, reason, amountMinorUnits);
     case 'DECLINED':
     case 'FAILED':
       if (reason === DUPLICATE_MERCHANT_ORDER_ID) {
@@ -300,6 +322,16 @@ export function walletPaymentToParams(
   // they were refused when the SDK has stored the payment as unresolved and is still polling
   // for it. Anything not stated final is pending, exactly as the SDK records it.
   const stated = outcome.responseStatus?.trim().toUpperCase();
+  if (stated === 'RETRY') {
+    // Veyra received it and did not send it to the bank: nothing was paid; try again.
+    return {
+      outcome: 'not_sent',
+      title: 'Payment Not Sent',
+      message: withReason(outcome.message ?? 'The payment was not sent to the bank', outcome.responseStatusReason),
+      amountMinorUnits,
+      details: lines(outcome.responseCode && `Response: ${outcome.responseCode}`, 'Nothing was paid. Try again.'),
+    };
+  }
   if (stated === 'NOT_SENT') {
     // Never reached Veyra: nothing was paid. A card this phone cannot pay with gets the
     // add-it-again advice; anything else says why and lets the payer try again.

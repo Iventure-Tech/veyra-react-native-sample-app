@@ -551,7 +551,8 @@ All methods return promises. **A promise resolves with the call's outcome** — 
 |---|---|---|
 | `wallet.getBanks(accountNumber?)` | `BankList` | issuer list for the picker — `banks` on `'APPROVED'`; otherwise `'FAILED'` with the reason and no banks. A read: never `'PENDING'`, retrying as is is safe |
 | `wallet.verifyAccount(params)` | `VerifyAccountResponse` | eligibility pre-check; a read, never `'PENDING'`. A refusal before sending (missing field, offline…) is `'FAILED'` with the reason |
-| `wallet.digitise(params)` | `DigitiseResult` | tokenise the account; `recommendation` is **your app's** risk decision — required, never defaulted. A missing field is `'NOT_SENT'` / `INVALID_REQUEST` |
+| `wallet.digitise(params)` | `DigitiseResult` | tokenise the account; `recommendation` is **your app's** risk decision — required, never defaulted. A missing field is `'NOT_SENT'` / `INVALID_REQUEST`. Pass your own `clientRequestId` (e.g. a fresh UUID per attempt) to be able to cancel it |
+| `wallet.cancelDigitise(clientRequestId)` | `CancelResult` | cancels the `digitise` started with that `clientRequestId`, only while it is still on the device (§9.8). A digitise started without one cannot be cancelled |
 
 `digitise` resolves with `responseCode` `'APPROVED'` (ready), `'APPROVE_REQUIRE_AUTH'`
 (activation needed — `activationMethods` lists the OTP channels), or `'DECLINED'`. Any other
@@ -641,7 +642,7 @@ with no usable answer — read `tokenStatus(ref)` before trying again.
 | Rail | Methods | Platforms |
 |---|---|---|
 | Tap-to-pay | arm via `setActiveCard`; card-reading events on `wallet.onTapEvent` (`transactionStarted` / `transactionCompleted` / `activationFailed`) | **Android only** — `wallet.onTapEvent` throws `VeyraError` `UNSUPPORTED_ON_PLATFORM` on iOS, so subscribe only where `Platform.OS === 'android'` |
-| Scan-to-pay | `inspectScannedQr(payload)` → verified handle → `payScannedContext(handle)` → `PaymentOutcome` | both |
+| Scan-to-pay | `inspectScannedQr(payload)` → verified handle (+ `merchantOrderId`) → `payScannedContext(handle)` → `PaymentOutcome`; cancel with `wallet.cancelPayment(merchantOrderId)` while still on the device (§9.8) | both |
 | Show-QR-to-pay | `showQrToPay(amountMinorUnits)` → `PaymentQr`; expiry on `onQrExpired`; `cancelQrExpiry()` on teardown | both |
 
 **`showQrToPay` resolves a `PaymentQr` with a status.** `'APPROVED'` carries `payload` — render it.
@@ -680,6 +681,11 @@ is sent in any of the three (§9.2, Table A).
 
 The sheet's wording is the SDK's own: the React Native wallet config has no field to
 change it.
+
+A verified inspection carries `merchantOrderId` — the merchant's order ID signed into the QR, and
+what `wallet.cancelPayment` takes to cancel paying it (§9.8). It is `null` for a QR from an older
+merchant app that carries none; that payment cannot be cancelled, so disable your Cancel while it
+is being paid (as the sample does).
 
 A scanned QR that fails verification
 returns `{ verified: false, reason }` (`MALFORMED` / `MISSING_SIGNATURE` /
@@ -912,10 +918,13 @@ payment in flight — still resolves with a `sessionId` and ends with a `result`
 Only `result` (and iOS `ended`) are terminal. `cardContactLost` / `unsupportedCard`
 mean the reader **stays armed for a re-tap** — show a transient hint ("Hold steady" /
 "Card not supported — try another card") and keep the waiting screen up, exactly like a
-physical terminal. `merchant.tap.cancel(sessionId)` cancels an armed, untapped payment: the
-stream ends with a `'NOT_SENT'` / `CANCELLED` result — your own cancel, **not a result to show**
-(skip it, as the sample does). `cancel` needs no session, so a screen can always cancel on its
-way out.
+physical terminal. `merchant.cancelPayment(merchantOrderId)` cancels the tap by the order ID it
+was started with — while the reader waits for a card, while the card is read, and in the moment
+between the read and the request being sent (§9.8). A cancelled tap's stream ends with a
+`'NOT_SENT'` / `CANCELLED` result — your own cancel, **not a result to show** (skip it, as the
+sample does). Once the request has been sent, the cancel answers
+`'TOO_LATE_TO_CANCEL_REQUEST_ALREADY_SENT'` and the tap ends with its normal result. `cancelPayment`
+needs no session, so a screen can always cancel on its way out.
 Progress events `cardContactLost` / `readingComplete` / `sendingOnline` /
 `receivingOnline` fire on **both** platforms (they were Android-only in earlier releases);
 `ended` is iOS-only, and reports a reader session that ended *without* a card. Nothing
@@ -1070,6 +1079,11 @@ export function duplicateOrderMessage(original: OriginalPayment | null | undefin
 `originalPayment` is `null` on every other outcome, and can be `null` on the refusal itself when
 the gateway could not read the original (two attempts raced for the order id) — the sample then
 shows the "already paid" sentence; either way, do not take another payment for that order.
+
+**Cancelling a QR payment.** Both QR rails cancel through the same call as the tap,
+`merchant.cancelPayment(merchantOrderId)`: a `createPaymentContext` or a `chargeCustomerQr` still on
+the device resolves `'NOT_SENT'` / `CANCELLED` (§9.8). Once the get-paid QR is showing, its create
+has already been sent — closing the screen just stops showing it.
 
 ### 7.4 Transactions & receipts
 
@@ -1283,7 +1297,7 @@ deliberately no response code: a code asserts that a payment was attempted and s
 or failed to, so a made-up one would invite you to treat a request that never left the device as a
 payment (and put a made-up code on a receipt). Fix what the reason names and try again with the
 same `merchantOrderId` — a `NOT_SENT` payment does not use it up. `CANCELLED` is the one to
-skip: it is your own `tap.cancel`, not something to show.
+skip: it is your own `cancelPayment`, not something to show (§9.8).
 
 ## 8. Events
 
@@ -1595,7 +1609,7 @@ merchant.tap.onEvent((e) => {
       );
     case 'NOT_SENT':
       switch (r.responseStatusReason) {
-        case 'CANCELLED': return;                        // your own tap.cancel — not a result
+        case 'CANCELLED': return;                        // your own cancelPayment — not a result
         case 'NO_NETWORK_CONNECTION': return showNotSent('Connect to the internet');
         case 'CARD_READ_FAILED': return showNotSent('Ask the customer to tap again');
         case 'MODE_REFUSED': return showNotSent('Finish the other payment first');
@@ -1738,7 +1752,7 @@ digitisation (tap, `chargeCustomerQr`, `createPaymentContext`, `payScannedContex
 | `NOT_SENT` / `FAILED` | — | `NO_NETWORK_CONNECTION` | the phone has no internet connection | ask the user to connect, retry with the same order ID |
 | `NOT_SENT` / `FAILED` | — | `SDK_UNABLE_TO_CONNECT` | the phone is online but could not connect to Veyra | try again shortly with the same order ID |
 | `NOT_SENT` / `FAILED` | — | `NOT_AUTHENTICATED` | the SDK could not get credentials (your assertion/proxy provider returned nothing, or the token endpoint refused) | check your provider; retry |
-| `NOT_SENT` | — | `CANCELLED` | your app cancelled the call before it was sent (`merchant.tap.cancel`) | not a result — don't show it; back to the previous screen |
+| `NOT_SENT` | — | `CANCELLED` | your app cancelled the call before it was sent (`merchant.cancelPayment`, `wallet.cancelPayment`, `wallet.cancelDigitise` — §9.8) | not a result — don't show it; back to the previous screen |
 | `NOT_SENT` | — | `AUTH_CANCELLED` | the customer dismissed the device authentication sheet | stay on the confirm screen, let them try again |
 | `NOT_SENT` | — | `AUTH_FAILED` | device authentication did not succeed | stay on the confirm screen |
 | `NOT_SENT` | — | `AUTH_UNAVAILABLE` | the device has no passcode and no biometrics | send the customer to Settings |
@@ -2142,6 +2156,15 @@ was never sent, or never sent to the bank, as "processing". `'RETRY'` is also a 
 - **`FAILED` now means** Veyra received the request and didn't perform it, and retrying with the
   same reference won't help — for payments, mainly `94`. It does not use up the order ID.
 
+**Cancelling (§9.8):**
+
+| 2.x | 3.0.0 |
+|---|---|
+| `merchant.tap.cancel(sessionId)` | **removed** — `merchant.cancelPayment(merchantOrderId)`, by the order ID the tap was started with. It answers a `CancelResult` and no longer stops a payment that has already been sent |
+| — (a QR create or a customer-QR charge could not be cancelled) | `merchant.cancelPayment(merchantOrderId)` covers them too |
+| — (scan-to-pay could not be cancelled) | `wallet.cancelPayment(merchantOrderId)`, with the inspection's `merchantOrderId` |
+| — (add card could not be cancelled) | `wallet.cancelDigitise(clientRequestId)`; pass your own `clientRequestId` to `digitise` |
+
 ### 9.6 Where the codes come from
 
 Payment outcomes travel unchanged from the bank, through the issuer's gateway, the switch and the
@@ -2161,6 +2184,10 @@ carry the full documentation for every field):
 
 ```ts
 type ResponseStatus = 'APPROVED' | 'DECLINED' | 'FAILED' | 'PENDING' | 'RETRY' | 'NOT_SENT' | (string & {});
+
+type CancelResult =                     // the answer to a cancel — never a call's status (§9.8)
+  | 'CANCELLED' | 'TOO_LATE_TO_CANCEL_REQUEST_ALREADY_SENT' | 'TOO_LATE_TO_CANCEL_TASK_ALREADY_PROCESSED'
+  | 'NO_PAYMENT_IN_PROGRESS_FOR_ORDER_ID' | 'NO_DIGITISATION_IN_PROGRESS_FOR_CLIENT_REQUEST_ID';
 
 interface VeyraLookup<T> { value: T | null; failureReason: string | null; message: string | null }
 
@@ -2232,6 +2259,79 @@ interface MerchantTapResult {           // the tap `result` event
 }
 ```
 
+### 9.8 Cancelling a call
+
+A payment or an add-card can be cancelled **only while its request is still on the device**. Once
+it has been sent, nothing is cancellable: the call carries on and delivers its normal result.
+
+Every cancel names the call by a reference you already hold:
+
+| Call | Cancel | Reference |
+|---|---|---|
+| Card tap (`merchant.tap.start`), customer-QR charge (`chargeCustomerQr`), get-paid QR create (`createPaymentContext`) | `merchant.cancelPayment(merchantOrderId)` | the merchant order ID the payment was started with — you don't say which rail |
+| Scan-to-pay (`wallet.payScannedContext`) | `wallet.cancelPayment(merchantOrderId)` | the inspection's `merchantOrderId` — the order ID signed into the QR (`null` on a QR that carries none: that payment cannot be cancelled) |
+| Add a card (`wallet.digitise`) | `wallet.cancelDigitise(clientRequestId)` | the `clientRequestId` you passed to `digitise` (without one, the add-card cannot be cancelled) |
+
+The merchant and wallet sides keep separate books, so in an app that does both, the wallet's
+`cancelPayment('ORDER-1')` never cancels the merchant's own payment with the same order ID.
+
+```ts
+// Add a card, with a Cancel button
+const clientRequestId = newUuid();                    // a fresh one per attempt
+const pending = wallet.digitise({ ...params, clientRequestId });
+
+// Cancel pressed:
+const answer = await wallet.cancelDigitise(clientRequestId);
+if (answer === 'TOO_LATE_TO_CANCEL_REQUEST_ALREADY_SENT') {
+  showNote('This can no longer be cancelled');        // keep waiting for `pending`
+} else if (answer === 'NO_DIGITISATION_IN_PROGRESS_FOR_CLIENT_REQUEST_ID') {
+  close();                                            // nothing is running
+}                                                     // CANCELLED: `pending` resolves NOT_SENT / CANCELLED
+
+const result = await pending;
+if (result.responseStatus === 'NOT_SENT' && result.responseStatusReason === 'CANCELLED') {
+  return close();                                     // your own cancel — not a result to show
+}
+
+// A card tap, or either QR rail — the same call:
+const answer2 = await merchant.cancelPayment(orderId);
+```
+
+**The answers** (`CancelResult`). The answer is the reply to the cancel, never the call's status —
+the call still delivers its own outcome:
+
+| Answer | Meaning | What to show |
+|---|---|---|
+| `'CANCELLED'` | Stopped before anything was sent | Nothing yet: the call now ends `'NOT_SENT'` / `CANCELLED` — go back to the previous screen when it does. The same order ID / `clientRequestId` can be used again |
+| `'TOO_LATE_TO_CANCEL_REQUEST_ALREADY_SENT'` | The request has already left the device | "This can no longer be cancelled" — keep waiting; the call delivers its normal result |
+| `'TOO_LATE_TO_CANCEL_TASK_ALREADY_PROCESSED'` | The call had already finished | The result it already delivered |
+| `'NO_PAYMENT_IN_PROGRESS_FOR_ORDER_ID'` | No payment with that order ID is armed or running (wrong ID, never started, already finished, or a scanned QR with no order ID) | Nothing is in progress — just go back |
+| `'NO_DIGITISATION_IN_PROGRESS_FOR_CLIENT_REQUEST_ID'` | No add-card with that `clientRequestId` is running (wrong ID, started without one, already finished) | Nothing is in progress — just go back |
+
+The cancel promises reject only with a setup error (§9.1), like every other call.
+
+**What can be cancelled, per rail** — everything before the request is sent:
+
+| Rail | Cancellable (still on the device) | Not cancellable (sent) |
+|---|---|---|
+| Card tap | arming and waiting for a tap, reading the card, the moment after the card is read until the request is sent | contacting the bank — after `sendingOnline` the tap ends with its normal result |
+| Customer-QR charge | preparing the charge, before it is sent | once sent |
+| Get-paid QR create | before the create request is sent | once sent; a QR already on screen has been created — closing the screen just stops showing it |
+| Scan-to-pay | key top-up, the authentication sheet, building the payment | once sent. An authentication sheet already showing stays up until the customer dismisses it |
+| Add a card | attestation and preparing the request, before it is sent | once sent — an approved card is stored as usual |
+| Show-QR-to-pay (wallet) | **no wallet-side cancel**: the wallet sends nothing; the merchant's charge is the payment request. Only the merchant can cancel it, with `merchant.cancelPayment` before their charge is sent | — |
+
+**A cancelled call ends `'NOT_SENT'` / `CANCELLED`**, with no `responseCode` — nothing was sent and
+nothing needs reconciling. It is your own cancel, not a result: don't show a result screen for it
+(see §9.2, *Handling an outcome in code*, and Table A).
+
+**Leaving a screen.** Cancel what is still running on the way out, by the same reference — the
+sample's get-paid screen calls `merchant.cancelPayment(orderId)` when it loses focus. A payment
+already sent answers `'TOO_LATE_TO_CANCEL_REQUEST_ALREADY_SENT'` and lands in history as usual.
+
+See `src/cancel.ts` (the answer → action rule, unit-tested) and the three screens that use it:
+`GetPaidScreen.tsx`, `AddCardScreen.tsx`, `ScanToPayScreen.tsx`.
+
 ## 10. Platform availability at a glance
 
 | Capability | Android | iOS |
@@ -2251,6 +2351,8 @@ interface MerchantTapResult {           // the tap `result` event
 | `merchantOrderId` (required) on `chargeCustomerQr` | ✅ | ✅ |
 | `merchantOrderId` (required) on `tap.start` | ✅ | ✅ |
 | `merchantOrderId` (required) on `createPaymentContext` | ✅ | ✅ |
+| `merchant.cancelPayment` (tap, customer-QR charge, get-paid QR create) | ✅ | ✅ |
+| `wallet.cancelPayment` (scan-to-pay) / `wallet.cancelDigitise` | ✅ | ✅ |
 | Pending-outcome polling (backoff, 30-day stop) | ✅ | ✅ |
 | …but its lifetime | runs in the background via WorkManager | **app-scoped only** — no OS background execution |
 

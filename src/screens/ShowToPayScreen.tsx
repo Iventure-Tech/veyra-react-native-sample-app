@@ -55,9 +55,9 @@ export function ShowToPayScreen({
     // Settle poll: reconcile pending rows, then look up this payment by its hash.
     settleRef.current = setInterval(async () => {
       await wallet.reconcilePendingTransactions().catch(() => {});
-      const rows = await wallet
-        .getTransactions(rendered.tokenUniqueReference)
-        .catch(() => []);
+      const card = rendered.tokenUniqueReference;
+      if (!card) return;
+      const rows = await wallet.getTransactions(card).catch(() => []);
       const mine = rows.find((t) => t.transactionHash === rendered.transactionHash);
       if (mine?.authorizationStatus === 'APPROVED' || mine?.authorizationStatus === 'DECLINED') {
         stopTimers();
@@ -77,18 +77,23 @@ export function ShowToPayScreen({
       // No authentication call: showQrToPay raises the device authentication sheet itself,
       // once per render — so a regenerate after expiry asks again on its own.
       const rendered = await wallet.showQrToPay(Math.round(Number(amount) * 100));
+      if (rendered.responseStatus !== 'APPROVED' || !rendered.payload) {
+        // No QR was made (NOT_SENT: nothing left the phone). The customer dismissing the sheet is
+        // not worth a dialog — they just chose not to pay. Everything else is worth showing.
+        const reason = rendered.responseStatusReason;
+        if (reason === 'AUTH_CANCELLED') return;
+        if (reason === 'DEVICE_NOT_BOUND') {
+          Alert.alert(DEVICE_NOT_BOUND_TITLE, DEVICE_NOT_BOUND_MESSAGE);
+          return;
+        }
+        Alert.alert('Cannot show QR', `${rendered.message ?? 'No QR was made'} (${reason ?? rendered.responseStatus})`);
+        return;
+      }
       setQr(rendered);
       startWatching(rendered);
     } catch (e) {
-      const err = e as VeyraError;
-      // The customer dismissing the sheet is not an error worth a dialog — they just chose not
-      // to pay. Everything else is worth showing.
-      if (err.code === 'AUTH_CANCELLED') return;
-      if (err.code === 'DEVICE_NOT_BOUND') {
-        Alert.alert(DEVICE_NOT_BOUND_TITLE, DEVICE_NOT_BOUND_MESSAGE);
-        return;
-      }
-      Alert.alert('Cannot show QR', err.message);
+      // Only a setup mistake rejects.
+      Alert.alert('Cannot show QR', (e as VeyraError).message);
     }
   };
 
@@ -119,7 +124,7 @@ export function ShowToPayScreen({
         ) : (
           <View style={styles.qrArea}>
             <QrTile>
-              <QRCode value={qr.payload} size={260} />
+              <QRCode value={qr.payload ?? ''} size={260} />
             </QrTile>
             <Busy
               label={`Waiting for the merchant to scan…${secondsLeft !== null ? ` (${secondsLeft}s)` : ''}`}

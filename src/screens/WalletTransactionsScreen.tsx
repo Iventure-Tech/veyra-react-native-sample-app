@@ -80,7 +80,18 @@ export function WalletTransactionsScreen({
     setCheckingStatus(true);
     setStatusNote(null);
     try {
-      const fresh = await wallet.refreshTransactionStatus(transactionHash);
+      const lookup = await wallet.refreshTransactionStatus(transactionHash);
+      // A read: the stored row as it now stands, or why the check could not be made. A check that
+      // could not be made never changes the row — say why and keep showing it.
+      if (lookup.failureReason) {
+        setStatusNote(
+          lookup.failureReason === 'NO_NETWORK_CONNECTION'
+            ? 'No internet connection — connect and try again.'
+            : `Could not check right now (${lookup.failureReason}).`
+        );
+        return;
+      }
+      const fresh = lookup.value;
       if (fresh) {
         setDetail(fresh);
         setRows(
@@ -92,12 +103,8 @@ export function WalletTransactionsScreen({
         setStatusNote('Still processing — the wallet will keep checking.');
       }
     } catch (e) {
-      const err = e as VeyraError;
-      setStatusNote(
-        err.code === 'NO_NETWORK_CONNECTION'
-          ? 'No internet connection — connect and try again.'
-          : `Could not check right now: ${err.message}`
-      );
+      // Only a setup mistake rejects.
+      setStatusNote(`Could not check right now: ${(e as VeyraError).message}`);
     } finally {
       setCheckingStatus(false);
     }
@@ -112,7 +119,18 @@ export function WalletTransactionsScreen({
     setCheckingCredit(true);
     setCreditNote(null);
     try {
-      const fresh = await wallet.refreshCreditConfirmation(transactionHash);
+      const lookup = await wallet.refreshCreditConfirmation(transactionHash);
+      // A read: the stored row as it now stands, or why the check could not be made. A check that
+      // could not be made never changes the row — say why and keep showing it.
+      if (lookup.failureReason) {
+        setCreditNote(
+          lookup.failureReason === 'NO_NETWORK_CONNECTION'
+            ? 'No internet connection — connect and try again.'
+            : `Could not check right now (${lookup.failureReason}).`
+        );
+        return;
+      }
+      const fresh = lookup.value;
       if (fresh) {
         setDetail(fresh);
         setRows(
@@ -124,12 +142,8 @@ export function WalletTransactionsScreen({
         setCreditNote('Still not confirmed — the wallet will keep checking.');
       }
     } catch (e) {
-      const err = e as VeyraError;
-      setCreditNote(
-        err.code === 'NO_NETWORK_CONNECTION'
-          ? 'No internet connection — connect and try again.'
-          : `Could not check right now: ${err.message}`
-      );
+      // Only a setup mistake rejects.
+      setCreditNote(`Could not check right now: ${(e as VeyraError).message}`);
     } finally {
       setCheckingCredit(false);
     }

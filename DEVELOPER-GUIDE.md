@@ -248,7 +248,9 @@ await Veyra.initialize({ customerId: otherCustomerId, softpos, wallet });
 ```
 
 - **`customerId` is your identifier** for the logged-in customer — any stable string your
-  app already has. It never leaves the device.
+  app already has. The wallet sends it to Veyra on its card requests (adding a card, the
+  eligibility check, card activation) as `customer_id`, so Veyra support can find a
+  customer's requests; SDK logs only ever show it masked. SoftPOS never sends it.
 - **After `Veyra.signOut()`** every call rejects with `NOT_SIGNED_IN` until the next
   `Veyra.initialize`. Disable your payment entry points while signed out (this sample
   greys out Pay, Get paid and merchant settings on Home).

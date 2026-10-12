@@ -59,10 +59,12 @@ export function ShowToPayScreen({
       if (!card) return;
       const rows = await wallet.getTransactions(card).catch(() => []);
       const mine = rows.find((t) => t.transactionHash === rendered.transactionHash);
-      if (mine?.authorizationStatus === 'APPROVED' || mine?.authorizationStatus === 'DECLINED') {
+      // History returns this render's own PENDING row too — only a final status settles.
+      const status = mine?.authorizationStatus;
+      if (mine && (status === 'APPROVED' || status === 'DECLINED' || status === 'FAILED')) {
         stopTimers();
         setOutcome(
-          mine.authorizationStatus === 'APPROVED'
+          status === 'APPROVED'
             ? `Paid — ${mine.merchantName}`
             : `Declined — ${mine.merchantName}`
         );

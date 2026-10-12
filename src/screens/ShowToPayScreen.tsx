@@ -52,14 +52,16 @@ export function ShowToPayScreen({
       const left = Math.max(0, Math.round((rendered.expiresAtEpochMillis - Date.now()) / 1000));
       setSecondsLeft(left);
     }, 1000);
-    // Settle poll: reconcile pending rows, then look up this payment by its hash.
+    // Settle poll: check THIS payment by its hash only — one request per check.
+    // reconcilePendingTransactions() asks about every pending payment on the device, so calling
+    // it on a 3s loop sends a burst of requests each time and gets the wallet throttled (429).
+    const hash = rendered.transactionHash;
+    if (!hash) return;
     settleRef.current = setInterval(async () => {
-      await wallet.reconcilePendingTransactions().catch(() => {});
-      const card = rendered.tokenUniqueReference;
-      if (!card) return;
-      const rows = await wallet.getTransactions(card).catch(() => []);
-      const mine = rows.find((t) => t.transactionHash === rendered.transactionHash);
-      // History returns this render's own PENDING row too — only a final status settles.
+      // A check that could not be made carries a failureReason; this loop just asks again.
+      const lookup = await wallet.refreshTransactionStatus(hash).catch(() => null);
+      const mine = lookup?.value;
+      // The row stays PENDING until the merchant charges — only a final status settles.
       const status = mine?.authorizationStatus;
       if (mine && (status === 'APPROVED' || status === 'DECLINED' || status === 'FAILED')) {
         stopTimers();

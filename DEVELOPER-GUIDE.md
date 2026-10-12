@@ -662,6 +662,32 @@ if (qr.responseStatus === 'APPROVED' && qr.payload) {
 }
 ```
 
+To show "paid ✓" while the QR is up, check **this QR's own payment**: call
+`wallet.refreshTransactionStatus(qr.transactionHash)` every few seconds — one request per check —
+and stop on a final status:
+
+```ts
+const hash = qr.transactionHash;
+if (hash) {
+  const timer = setInterval(async () => {
+    // failureReason set when the check could not be made (offline, throttled…): just ask again next time
+    const row = (await wallet.refreshTransactionStatus(hash)).value;
+    const status = row?.authorizationStatus;
+    if (status === 'APPROVED' || status === 'DECLINED' || status === 'FAILED') {
+      clearInterval(timer);
+      onSettled(status === 'APPROVED');
+    }
+    // PENDING (the QR's own row exists from the moment it is shown), RETRY, or no row yet: keep the QR up
+  }, 3000);
+  // clear the timer on expiry (onQrExpired) and when the screen unmounts
+}
+```
+
+The QR's history row is created `'PENDING'` as soon as the QR is shown, so finding the row is not
+the answer — only a final status is. **Don't loop `reconcilePendingTransactions()` here:** it asks
+about every open payment on the device back-to-back, so on a short loop it gets the wallet
+throttled (`429`) by the gateway.
+
 The tap rail's `transactionCompleted` (`'APPROVED'` / `'DECLINED'` / `'ERROR'`) is a card-reading
 event — what the card told the terminal — not a call's outcome: the payment's outcome arrives on
 the history row and on `wallet.onTransactionResolved` (§8.1).
@@ -742,6 +768,11 @@ It is a read, so it has no status of its own: `failureReason` is set (and `check
 when the reconcile itself could not run (e.g. `NO_NETWORK_CONNECTION`). A row whose check fails is
 left as it is and the background sweep keeps asking, so reading `getTransactions` afterwards is
 always safe either way.
+
+It asks about **every** open row on the device, so call it on an occasion — app foregrounded,
+pull-to-refresh, history opened — **never on a loop**; a screen waiting for one payment (a shown QR)
+calls `refreshTransactionStatus` with that payment's hash instead. If the gateway throttles (`429`),
+the pass stops there and the remaining rows wait for the SDK's next sweep.
 
 `TransactionSummary` also carries `merchantOrderId` — the merchant's own order/basket id for
 the sale, the id the merchant's systems know it by, so a customer can quote it at the
@@ -1391,8 +1422,11 @@ gateway, because an attempt this device never recorded can outrank its own.
 
 **A payment still on its way counts.** A tap or customer-QR charge is on the history as `PENDING` before its request leaves, and the gateway's answer is combined with this device's own attempts — so while a payment is in flight the lookup answers `PENDING` (don't take another payment), even when the gateway has no record of it yet.
 
-**A merchant QR that has not been paid yet** has no attempt, so it answers rank 4 —
-`'RETRY'` / `'25'` / `UNABLE_TO_LOCATE_RECORD` — until the customer pays it. That is not a failure.
+**A merchant QR that has not been paid yet** answers `'PENDING'` on the device that created it — the QR is
+on its history from creation, as an open attempt — until the customer pays it. That is not a failure,
+and it means the same thing: don't take another payment for the order while the QR can still be paid.
+Asked from a device with no record of the QR (another device, or after a reinstall), the gateway has no
+attempt to report, so it answers rank 4 — `'RETRY'` / `'25'` / `UNABLE_TO_LOCATE_RECORD`.
 
 **It is a read** (§9.4). It changes nothing, so asking again is always safe, and it never answers
 with an outcome of its own. When the gateway could not be asked, `failureReason` says why

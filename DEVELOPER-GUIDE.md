@@ -672,7 +672,7 @@ with no usable answer — read `tokenStatus(ref)` before trying again.
 ### 6.4 Tap to pay
 
 **Android only** — iOS has no tap-to-pay, so on iOS the wallet pays by QR (§6.5): `openPaySession`
-answers `NFC_UNAVAILABLE`, `closePaySession` does nothing, `isPaySessionOpen` is always `false`, and
+answers `NFC_UNAVAILABLE`, `closePaySession` does nothing, `isPaySessionOpen()` is always `false`, and
 `observeTapEvents` throws.
 
 | Call | What it does | Resolves with |

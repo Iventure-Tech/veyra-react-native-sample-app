@@ -60,7 +60,7 @@ export function AddCardScreen({
   }, []);
 
   useEffect(() => {
-    const sub = wallet.onActivationEvent((e) => {
+    const sub = wallet.observeActivationEvents((e) => {
       if (e.tokenUniqueReference !== tokenRef) return;
       if (e.event === 'activated') {
         Alert.alert('Card activated', 'Your card is ready to pay.');
@@ -219,7 +219,7 @@ export function AddCardScreen({
   const requestCode = async (method: ActivationMethodInfo) => {
     if (!tokenRef) return;
     try {
-      const sent = await wallet.requestActivationCode(tokenRef, method.medium, method.contact);
+      const sent = await wallet.requestActivationCode(tokenRef, method.medium);
       if (sent.responseStatus !== 'APPROVED') {
         Alert.alert(
           'Could not send code',

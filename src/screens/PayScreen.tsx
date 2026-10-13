@@ -5,7 +5,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
   wallet,
   usePaySession,
-  type Card,
+  type Token,
   type WalletTapEvent,
 } from 'veyra-sdk-react-native';
 import type { RootStackParamList } from '../../App';
@@ -24,7 +24,7 @@ const CARD_LIST_RELOAD_MS = 7_200_000; // 2 hours
  * focused; selecting a card (Android) arms it for tapping. Cards with
  * `requiresOnline` are greyed out — the SDK restores them by itself.
  *
- * `setActiveCard` is what arms a card for this app run: it is how the SDK learns which card
+ * `setActiveToken` is what arms a card for this app run: it is how the SDK learns which card
  * a tap should use and where the tap callbacks are delivered. Storage remembering the card
  * from a previous run is not the same thing, so the screen re-arms the remembered card on
  * every focus rather than only when the user picks a different one.
@@ -40,14 +40,14 @@ export function PayScreen({
   const focused = useIsFocused();
   usePaySession(focused);
 
-  const [cards, setCards] = useState<Card[] | null>(null);
+  const [cards, setCards] = useState<Token[] | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [armedId, setArmedId] = useState<string | null>(null);
   const [tapStatus, setTapStatus] = useState<string | null>(null);
 
   const reload = useCallback(() => {
-    wallet.getCards().then(setCards).catch(() => setCards([]));
-    wallet.getActiveCard().then((c) => setActiveId(c?.id ?? null)).catch(() => {});
+    wallet.getTokens().then(setCards).catch(() => setCards([]));
+    wallet.getActiveToken().then((t) => setActiveId(t?.tokenUniqueReference ?? null)).catch(() => {});
   }, []);
 
   useFocusEffect(reload);
@@ -58,8 +58,8 @@ export function PayScreen({
   // while this screen is already up, which is precisely when no re-read is coming.
   useEffect(() => {
     const subs = [
-      wallet.onTokenStatusChanged(reload),
-      wallet.onCardKeyStateChanged(reload),
+      wallet.observeTokenStatusChanged(reload),
+      wallet.observeCardKeyStateChanged(reload),
     ];
     return () => subs.forEach((s) => s.remove());
   }, [reload]);
@@ -76,11 +76,11 @@ export function PayScreen({
   }, [focused, reload]);
 
   // Re-arm the remembered card whenever this screen becomes the payment screen. Runs after
-  // usePaySession above, so the pay session setActiveCard requires is already open.
+  // usePaySession above, so the pay session setActiveToken requires is already open.
   useEffect(() => {
     if (!focused || !activeId || activeId === armedId) return;
     wallet
-      .setActiveCard(activeId)
+      .setActiveToken(activeId)
       .then((selection) => {
         if (selection.responseStatus === 'APPROVED') setArmedId(activeId);
       })
@@ -99,9 +99,9 @@ export function PayScreen({
   // `requireOnline`, and can never fix `amountExceedCardLimit`, whose cap is provisioned with the
   // card. Telling the payer to go online for the second sends them round a loop that cannot work.
   useEffect(() => {
-    const tur = cards?.find((c) => c.id === activeId)?.tokenUniqueReference;
+    const tur = cards?.find((c) => c.tokenUniqueReference === activeId)?.tokenUniqueReference;
     if (!tur) return;
-    const sub = wallet.onPaymentRefusal(tur, (refusal) => {
+    const sub = wallet.observePaymentRefusals(tur, (refusal) => {
       if (refusal.type === 'requireOnline') {
         Alert.alert(
           'Connect to the internet',
@@ -133,7 +133,7 @@ export function PayScreen({
   useEffect(() => {
     if (!cards) return;
     const pending = new Set(
-      cards.filter((c) => c.requiresActivation).map((c) => c.tokenUniqueReference ?? c.id)
+      cards.filter((c) => c.requiresActivation).map((c) => c.tokenUniqueReference)
     );
     for (const ref of observed.current) {
       if (!pending.has(ref)) {
@@ -149,7 +149,7 @@ export function PayScreen({
   }, [cards]);
 
   useEffect(() => {
-    const sub = wallet.onActivationEvent((e) => {
+    const sub = wallet.observeActivationEvents((e) => {
       if (!observed.current.has(e.tokenUniqueReference)) return;
       if (e.event === 'activated') {
         observed.current.delete(e.tokenUniqueReference);
@@ -182,10 +182,10 @@ export function PayScreen({
   );
 
   useEffect(() => {
-    // Tap-to-pay is Android-only: on iOS onTapEvent throws UNSUPPORTED_ON_PLATFORM, so subscribe
+    // Tap-to-pay is Android-only: on iOS observeTapEvents throws UNSUPPORTED_ON_PLATFORM, so subscribe
     // only where the card can be tapped.
     if (Platform.OS !== 'android') return;
-    const sub = wallet.onTapEvent((e: WalletTapEvent) => {
+    const sub = wallet.observeTapEvents((e: WalletTapEvent) => {
       if (e.type === 'transactionStarted') setTapStatus('Paying…');
       if (e.type === 'transactionCompleted') {
         setTapStatus(null);
@@ -204,7 +204,7 @@ export function PayScreen({
     return () => sub.remove();
   }, [reload]);
 
-  const removeCard = (card: Card) => {
+  const removeCard = (card: Token) => {
     Alert.alert('Remove this card?', 'The token is deactivated on the backend and removed from this device.', [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -212,7 +212,7 @@ export function PayScreen({
         style: 'destructive',
         onPress: async () => {
           try {
-            const removal = await wallet.deactivateToken(card.tokenUniqueReference ?? card.id);
+            const removal = await wallet.deactivateToken(card.tokenUniqueReference);
             // Only APPROVED removed the card; anything else leaves it in the wallet, so say why.
             if (removal.responseStatus !== 'APPROVED') {
               Alert.alert(
@@ -233,18 +233,18 @@ export function PayScreen({
     ]);
   };
 
-  const selectCard = async (card: Card) => {
+  const selectCard = async (card: Token) => {
     try {
       // Android: arms tap-to-pay for this card (needs the pay session — mounted above).
-      const selection = await wallet.setActiveCard(card.id);
+      const selection = await wallet.setActiveToken(card.tokenUniqueReference);
       // An answer: FAILED / CARD_NOT_FOUND (gone from this wallet) or CARD_DATA_MISSING (add it again).
       if (selection.responseStatus !== 'APPROVED') {
         Alert.alert('Cannot select card', `${selection.message ?? 'This card cannot be selected'} (${selection.responseStatusReason ?? selection.responseStatus})`);
         reload();
         return;
       }
-      setActiveId(card.id);
-      setArmedId(card.id);
+      setActiveId(card.tokenUniqueReference);
+      setArmedId(card.tokenUniqueReference);
     } catch (e) {
       // Only a setup error rejects.
       Alert.alert('Cannot select card', (e as Error).message);
@@ -261,10 +261,10 @@ export function PayScreen({
         </Section>
       )}
       {cards.map((card) => {
-        const active = card.id === activeId;
+        const active = card.tokenUniqueReference === activeId;
         const blocked = card.requiresOnline || !card.isActive || card.requiresActivation;
         return (
-          <View key={card.id} style={[styles.card, blocked && styles.cardBlocked, active && styles.cardActive]}>
+          <View key={card.tokenUniqueReference} style={[styles.card, blocked && styles.cardBlocked, active && styles.cardActive]}>
             <Text style={styles.cardPan}>{card.maskedPan}</Text>
             <Text style={styles.cardMeta}>
               {card.cardHolderName ?? ''} {card.expiry ? `· ${card.expiry}` : ''}
@@ -278,12 +278,12 @@ export function PayScreen({
               title="Transactions"
               onPress={() =>
                 navigation.navigate('WalletTransactions', {
-                  tokenUniqueReference: card.tokenUniqueReference ?? card.id,
+                  tokenUniqueReference: card.tokenUniqueReference,
                 })
               }
             />
             {!blocked && (
-              <Button title="Show QR to pay" onPress={() => navigation.navigate('ShowToPay', { cardId: card.id })} />
+              <Button title="Show QR to pay" onPress={() => navigation.navigate('ShowToPay', { tokenUniqueReference: card.tokenUniqueReference })} />
             )}
             <Button title="Remove card" destructive onPress={() => removeCard(card)} />
           </View>

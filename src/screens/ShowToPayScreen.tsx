@@ -34,7 +34,7 @@ export function ShowToPayScreen({
   };
 
   useEffect(() => {
-    const sub = wallet.onQrExpired(() => {
+    const sub = wallet.observeQrExpired(() => {
       setExpired(true);
       stopTimers();
     });

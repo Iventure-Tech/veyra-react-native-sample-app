@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Alert, StyleSheet, Text } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Pressable } from 'react-native';
-import { merchant, type Bank, type MerchantType } from 'veyra-sdk-react-native';
+import { softpos, type Bank, type MerchantType } from 'veyra-sdk-react-native';
 import { theme } from '../theme';
 import type { RootStackParamList } from '../../App';
 import { SAMPLE_ACCOUNT } from '../../veyra.config';
@@ -33,14 +33,14 @@ export function RegisterMerchantScreen({
 
   useEffect(() => {
     // A read: the banks, or a reason the list could not be loaded (the picker just stays empty).
-    merchant.getSettlementBanks().then((list) => setBanks(list.banks)).catch(() => {});
+    softpos.getSettlementBanks().then((list) => setBanks(list.banks)).catch(() => {});
   }, []);
 
   const set = (key: keyof typeof form) => (v: string) => setForm({ ...form, [key]: v });
 
   const register = async () => {
     try {
-      const result = await merchant.register({
+      const result = await softpos.register({
         merchantType,
         merchantName: form.merchantName,
         emailAddress: form.emailAddress,

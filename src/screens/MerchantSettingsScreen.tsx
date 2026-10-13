@@ -2,7 +2,7 @@ import React, { useCallback, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { merchant, type MerchantStatusResult, type StoredMerchant } from 'veyra-sdk-react-native';
+import { softpos, type MerchantStatusResult, type StoredMerchant } from 'veyra-sdk-react-native';
 import type { RootStackParamList } from '../../App';
 import { theme } from '../theme';
 import { Busy, Button, Field, FormScrollView, Section } from '../ui';
@@ -33,7 +33,7 @@ export function MerchantSettingsScreen({
   });
 
   const reload = useCallback(() => {
-    merchant.getStored().then(setStored).catch(() => setStored(null));
+    softpos.getStored().then(setStored).catch(() => setStored(null));
   }, []);
 
   useFocusEffect(reload);
@@ -111,7 +111,7 @@ export function MerchantSettingsScreen({
           <Button
             title={busy ? 'Saving…' : 'Save changes'}
             disabled={!!busy}
-            onPress={() => run('Update', () => merchant.update(form), 'Profile updated').then((ok) => ok && setEditing(false))}
+            onPress={() => run('Update', () => softpos.update(form), 'Profile updated').then((ok) => ok && setEditing(false))}
           />
           <Button title="Cancel" destructive disabled={!!busy} onPress={() => setEditing(false)} />
         </Section>
@@ -144,9 +144,9 @@ export function MerchantSettingsScreen({
       </Section>
       <Section title="Backend status">
         {busy ? <Busy label={busy} /> : null}
-        <Button title="Refresh status" disabled={!!busy} onPress={() => run('Refresh', () => merchant.refreshStatus())} />
-        <Button title="Activate" disabled={!!busy} onPress={() => run('Activate', () => merchant.activate())} />
-        <Button title="Deactivate" destructive disabled={!!busy} onPress={() => run('Deactivate', () => merchant.deactivate())} />
+        <Button title="Refresh status" disabled={!!busy} onPress={() => run('Refresh', () => softpos.refreshStatus())} />
+        <Button title="Activate" disabled={!!busy} onPress={() => run('Activate', () => softpos.activate())} />
+        <Button title="Deactivate" destructive disabled={!!busy} onPress={() => run('Deactivate', () => softpos.deactivate())} />
       </Section>
     </ScrollView>
   );

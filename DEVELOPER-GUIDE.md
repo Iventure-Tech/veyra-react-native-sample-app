@@ -677,7 +677,7 @@ with no usable answer — read `tokenStatus(ref)` before trying again.
 |---|---|---|
 | Tap-to-pay | arm via `setActiveToken`; card-reading events on `wallet.observeTapEvents` (`transactionStarted` / `transactionCompleted` / `activationFailed`) | **Android only** — `wallet.observeTapEvents` throws `VeyraError` `UNSUPPORTED_ON_PLATFORM` on iOS, so subscribe only where `Platform.OS === 'android'` |
 | Scan-to-pay | `inspectScannedQr(payload)` → verified handle (+ `merchantOrderId`) → `payScannedContext(handle)` → `PaymentOutcome`; cancel with `wallet.cancelPayment(merchantOrderId)` while still on the device (§9.8) | both |
-| Show-QR-to-pay | `showQrToPay(amountMinorUnits)` → `PaymentQr`; expiry on `observeQrExpired`; `cancelQrExpiry()` on teardown | both |
+| Show-QR-to-pay | `showQrToPay(amountMinorUnits, onExpired?)` → `PaymentQr`; `onExpired` fires once when that QR expires; `cancelQrExpiry()` on teardown | both |
 
 **`showQrToPay` resolves a `PaymentQr` with a status.** `'APPROVED'` carries `payload` — render it.
 `'NOT_SENT'` carries no QR and the reason none was made: `ONLINE_REQUIRED`, `TOKEN_NOT_ACTIVE`,
@@ -685,8 +685,13 @@ with no usable answer — read `tokenStatus(ref)` before trying again.
 `AUTH_CANCELLED` / `AUTH_FAILED` / `AUTH_UNAVAILABLE`. Nothing is sent either way — the merchant
 submits the payment — so these are the only two statuses it answers.
 
+`onExpired` belongs to the QR it was rendered with: it fires **once**, when that QR expires — blank
+the code (an expired QR must never stay scannable) and offer a new one. A later `showQrToPay`
+replaces the QR and its callback, a call that makes no QR never fires it, and `cancelQrExpiry()`
+clears it — call that when the screen unmounts. The same parameter as the Android and iOS SDKs.
+
 ```ts
-const qr = await wallet.showQrToPay(amountMinorUnits);
+const qr = await wallet.showQrToPay(amountMinorUnits, () => blankAndOfferNewCode());
 if (qr.responseStatus === 'APPROVED' && qr.payload) {
   render(qr.payload);
 } else if (qr.responseStatusReason === 'AUTH_CANCELLED') {
@@ -713,7 +718,7 @@ if (hash) {
     }
     // PENDING (the QR's own row exists from the moment it is shown), RETRY, or no row yet: keep the QR up
   }, 3000);
-  // clear the timer on expiry (observeQrExpired) and when the screen unmounts
+  // clear the timer on expiry (onExpired) and when the screen unmounts
 }
 ```
 
@@ -1478,7 +1483,7 @@ wording comes from `orderLookupText` in `src/paymentResult.ts` (unit-tested).
 
 One `NativeEventEmitter` channel per family. Each wallet `observeX` returns a subscription —
 `remove()` it on unmount — and has a matching `stopObservingX()` that removes every listener of that
-kind at once (`stopObservingTapEvents`, `stopObservingQrExpired`, `stopObservingActivationEvents`,
+kind at once (`stopObservingTapEvents`, `stopObservingActivationEvents`,
 `stopObservingTokenStatusChanged`, `stopObservingTransactionResolved`,
 `stopObservingCardKeyStateChanged`, and `stopObservingPaymentRefusals(tur)` per card) — the same
 names as the Android and iOS SDKs:
@@ -1489,7 +1494,7 @@ names as the Android and iOS SDKs:
 | `wallet.observeTapEvents` | `transactionStarted` / `transactionCompleted` / `activationFailed` — Android tap rail only; **throws `VeyraError` `UNSUPPORTED_ON_PLATFORM` on iOS** (a listener that could never fire would be a silent no-op), so guard it with `Platform.OS === 'android'` |
 | `wallet.observePaymentRefusals(tur, …)` | `requireOnline` / `amountExceedCardLimit` / `deviceNotBound`, **per card**, on every rail that platform has |
 | `merchant.tap.onEvent` | `cardDetected` / `cardContactLost` / `unsupportedCard` / progress / `ended` / `result` (a `MerchantTapResult` with the triple — every attempt ends with one, `'NOT_SENT'` included; iOS `ended` is a reader session that closed without a card) |
-| `wallet.observeQrExpired` / `merchant.onQrExpired` | one `expired` per rendered QR |
+| `merchant.onQrExpired` (the wallet passes `onExpired` to `showQrToPay` instead) | one `expired` per rendered QR |
 | `merchant.onTransactionResolved` | one settlement per pending sale — `APPROVED` / `DECLINED` / `FAILED`, never `PENDING` (see §7.6) |
 | `merchant.onCreditConfirmation` | one terminal credit confirmation per sale — `RECEIVED`, or the final 30-day `UNABLE_TO_CONFIRM` (see §7.5) |
 | `wallet.observeTokenStatusChanged` | the issuer changed a card's status — suspended, reactivated, expired, deactivated (see §8.1) |
@@ -2280,7 +2285,7 @@ subscription, and `stopObservingX()` removes every listener of that kind.
 | `wallet.requestActivationCode(ref, medium, contact, reason)` | `wallet.requestActivationCode(ref, medium, reason)` — the issuer sends the code to the contact it holds for `medium` |
 | `wallet.onActivationEvent(cb)` | `wallet.observeActivationEvents(cb)` / `stopObservingActivationEvents()` |
 | `wallet.onTapEvent(cb)` | `wallet.observeTapEvents(cb)` / `stopObservingTapEvents()` (Android only, as before) |
-| `wallet.onQrExpired(cb)` | `wallet.observeQrExpired(cb)` / `stopObservingQrExpired()` |
+| `wallet.onQrExpired(cb)` | `wallet.showQrToPay(amountMinorUnits, onExpired)` — the callback belongs to the QR it was rendered with; a new `showQrToPay` replaces it and `cancelQrExpiry()` clears it |
 | `wallet.onTokenStatusChanged(cb)` | `wallet.observeTokenStatusChanged(cb)` / `stopObservingTokenStatusChanged()` |
 | `wallet.onTransactionResolved(cb)` | `wallet.observeTransactionResolved(cb)` / `stopObservingTransactionResolved()` |
 | `wallet.onCardKeyStateChanged(cb)` | `wallet.observeCardKeyStateChanged(cb)` / `stopObservingCardKeyStateChanged()` |

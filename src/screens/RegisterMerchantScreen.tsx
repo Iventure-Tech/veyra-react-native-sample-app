@@ -33,7 +33,7 @@ export function RegisterMerchantScreen({
 
   useEffect(() => {
     // A read: the banks, or a reason the list could not be loaded (the picker just stays empty).
-    softpos.getSettlementBanks().then((list) => setBanks(list.banks)).catch(() => {});
+    softpos.getBanks().then((list) => setBanks(list.banks)).catch(() => {});
   }, []);
 
   const set = (key: keyof typeof form) => (v: string) => setForm({ ...form, [key]: v });

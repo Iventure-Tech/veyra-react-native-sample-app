@@ -33,7 +33,7 @@ export function MerchantSettingsScreen({
   });
 
   const reload = useCallback(() => {
-    softpos.getStored().then(setStored).catch(() => setStored(null));
+    softpos.getStoredMerchantData().then(setStored).catch(() => setStored(null));
   }, []);
 
   useFocusEffect(reload);
@@ -111,7 +111,7 @@ export function MerchantSettingsScreen({
           <Button
             title={busy ? 'Saving…' : 'Save changes'}
             disabled={!!busy}
-            onPress={() => run('Update', () => softpos.update(form), 'Profile updated').then((ok) => ok && setEditing(false))}
+            onPress={() => run('Update', () => softpos.updateMerchant(form), 'Profile updated').then((ok) => ok && setEditing(false))}
           />
           <Button title="Cancel" destructive disabled={!!busy} onPress={() => setEditing(false)} />
         </Section>

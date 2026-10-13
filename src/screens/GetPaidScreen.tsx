@@ -96,7 +96,7 @@ export function GetPaidScreen({
     useCallback(() => {
       softpos.isRegistered().then(setRegistered).catch(() => setRegistered(false));
       const readStatus = () =>
-        Promise.all([softpos.isMerchantActive(), softpos.getStored()]).then(([isActive, m]) => {
+        Promise.all([softpos.isMerchantActive(), softpos.getStoredMerchantData()]).then(([isActive, m]) => {
           setActive(isActive);
           setMerchantStatus(m?.merchantStatus ?? null);
           return isActive;
@@ -119,68 +119,56 @@ export function GetPaidScreen({
     }, [])
   );
 
-  // Tap events: transient hints keep the waiting screen up; only `result` is terminal.
-  useEffect(() => {
-    const sub = softpos.tap.onEvent((e: TapEvent) => {
-      switch (e.type) {
-        case 'cardDetected':
-          setHint('Card detected — hold steady…');
+  // Tap events, handed to tap.start: transient hints keep the waiting screen up; only `result`
+  // (and iOS `ended`) is terminal, and nothing arrives after it.
+  const onTapEvent = (e: TapEvent) => {
+    switch (e.type) {
+      case 'cardDetected':
+        setHint('Card detected — hold steady…');
+        break;
+      case 'cardContactLost':
+        setHint('Hold the card steady against the phone');
+        break;
+      case 'unsupportedCard':
+        setHint('Card not supported — try another card');
+        break;
+      case 'sendingRequestOnline':
+        setHint('Contacting your bank…');
+        break;
+      case 'ended':
+        setRail('idle');
+        setHint(null);
+        setCancelRefused(false);
+        inFlightOrderIdRef.current = null;
+        break;
+      case 'result':
+        setRail('idle');
+        setHint(null);
+        setCancelRefused(false);
+        inFlightOrderIdRef.current = null;
+        attemptEnded(e.result.responseStatus);
+        // Your own cancel is not a result: nothing was sent, so just go back to amount entry. The
+        // order id stays usable (NOT_SENT), so the next attempt reuses it.
+        if (isCancelledOutcome(e.result)) {
           break;
-        case 'cardContactLost':
-          setHint('Hold the card steady against the phone');
-          break;
-        case 'unsupportedCard':
-          setHint('Card not supported — try another card');
-          break;
-        case 'sendingRequestOnline':
-          setHint('Contacting your bank…');
-          break;
-        case 'ended':
-          setRail('idle');
-          setHint(null);
-          setCancelRefused(false);
-          inFlightOrderIdRef.current = null;
-          break;
-        case 'result':
-          setRail('idle');
-          setHint(null);
-          setCancelRefused(false);
-          inFlightOrderIdRef.current = null;
-          attemptEnded(e.result.responseStatus);
-          // Your own cancel is not a result: nothing was sent, so just go back to amount entry. The
-          // order id stays usable (NOT_SENT), so the next attempt reuses it.
-          if (isCancelledOutcome(e.result)) {
-            break;
-          }
-          if (e.result.responseStatus === 'APPROVED' && e.result.merchantTransactionReference) {
-            setLastApprovedRef(e.result.merchantTransactionReference);
-          }
-          navigation.navigate(
-            'PaymentResult',
-            tapResultToParams(e.result, chargedRef.current)
-          );
-          break;
-        default:
-          break;
-      }
-    });
-    return () => sub.remove();
-  }, [navigation]);
+        }
+        if (e.result.responseStatus === 'APPROVED' && e.result.merchantTransactionReference) {
+          setLastApprovedRef(e.result.merchantTransactionReference);
+        }
+        navigation.navigate(
+          'PaymentResult',
+          tapResultToParams(e.result, chargedRef.current)
+        );
+        break;
+      default:
+        break;
+    }
+  };
 
   // Beneficiary credit confirmation renders on the payment result screen (a waiting line that
   // flips when the funds land) — the `softpos.observeCreditConfirmation` subscription lives there,
   // matched to the sale by reference. Settlement news only, never a change to the payment
   // outcome; an answer arriving after the result screen is gone still lands in Transactions.
-
-  // An expired get-paid QR must stop being shown — it is no longer chargeable.
-  useEffect(() => {
-    const sub = softpos.observeQrExpired(() => {
-      setMpmExpired(true);
-      setMpmState('EXPIRED');
-      if (pollRef.current) clearInterval(pollRef.current);
-    });
-    return () => sub.remove();
-  }, []);
 
   useEffect(() => () => {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -205,10 +193,18 @@ export function GetPaidScreen({
       const orderId = orderIdForAttempt();
       inFlightOrderIdRef.current = orderId;
       setCancelRefused(false);
-      await softpos.tap.start({ amountMinorUnits: minorUnits, merchantOrderId: orderId });
       chargedRef.current = minorUnits;
-      setRail('tap');
-      setHint('Ask the customer to tap their phone or card');
+      // A refusal can end the tap before start() resolves (its NOT_SENT result arrives first), so
+      // only show the waiting screen for a tap that is still on.
+      let ended = false;
+      await softpos.tap.start({ amountMinorUnits: minorUnits, merchantOrderId: orderId }, (e) => {
+        if (e.type === 'result' || e.type === 'ended') ended = true;
+        onTapEvent(e);
+      });
+      if (!ended) {
+        setRail('tap');
+        setHint('Ask the customer to tap their phone or card');
+      }
     } catch (e) {
       // Only a setup mistake rejects; a refusal (blank order id, the other mode busy) arrives as
       // a NOT_SENT `result` event.
@@ -258,7 +254,13 @@ export function GetPaidScreen({
     setCancelRefused(false);
     setRail('mpmCreating');
     try {
-      const qr = await softpos.createPaymentContext(minorUnits, undefined, orderId);
+      // An expired get-paid QR must stop being shown — it is no longer chargeable. The callback
+      // fires once; a new create replaces it and cancelQrExpiry() (on teardown) stops it.
+      const qr = await softpos.createPaymentContext(minorUnits, undefined, orderId, () => {
+        setMpmExpired(true);
+        setMpmState('EXPIRED');
+        if (pollRef.current) clearInterval(pollRef.current);
+      });
       inFlightOrderIdRef.current = null;
       setCancelRefused(false);
       attemptEnded(qr.responseStatus);

@@ -526,6 +526,13 @@ Rules of the model:
   it does not present as a payment card and does not read cards.
 - **While the session screen is focused the device stays ready** — a customer queueing
   at a terminal, or re-tapping after a decline, needs no re-arming.
+- **The screen stays awake while it can take a tap.** For tap acceptance (Android and
+  iOS), that's from `merchant.tap.start` until the payment ends or is cancelled (waiting
+  for a card, reading it, and contacting the bank). For tap-to-pay (Android), it's while
+  the pay session is open. A phone whose screen has gone off can't read a card or pay by
+  tap. Otherwise the screen sleeps as usual. On iOS this uses the app's idle timer: the
+  SDK switches it off only if it was on, and turns it back on only if it switched it off.
+  If your app manages the idle timer itself, set it before starting a tap.
 - **Leaving the screen disarms**: navigation away, back gesture, app background, screen
   lock. Returning to the still-focused screen re-arms automatically.
 - **Tap APIs require their session** (`SESSION_REQUIRED` otherwise): `merchant.tap.*`

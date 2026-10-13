@@ -531,6 +531,14 @@ Rules of the model:
 - **Tap APIs require their session** (`SESSION_REQUIRED` otherwise): `merchant.tap.*`
   needs `useGetPaidSession`; `wallet.setActiveCard` (which arms Android tap-to-pay)
   needs `usePaySession`. QR-only flows work without a session — they never arm NFC.
+- **To disarm while the pay screen stays up** (a Cancel button, or your own countdown
+  expiring), call `wallet.closePaySession()`. A terminal tapping the phone then gets
+  "application not found", and a tap already under way finishes. `wallet.openPaySession()`
+  re-arms the same screen, and `wallet.isPaySessionOpen()` tells you which state you're in.
+  These are the same three calls, with the same names, as native Android and iOS. While a pay
+  session is open, the screen stays awake, because a phone whose screen has gone off cannot pay
+  by tap. On iOS, which has no tap-to-pay, `openPaySession()` answers `FAILED` /
+  `NFC_UNAVAILABLE` and the other two do nothing.
 - **A payment mid-flight is never interrupted** — if the user navigates away during
   online authorisation, the SDK completes the payment first, then disarms.
 - The mode is observable (`Veyra.currentMode()` → `'NONE' | 'SOFTPOS' | 'WALLET'`) but
@@ -628,6 +636,22 @@ if (selection.responseStatus !== 'APPROVED') {
   showProblem(selection.message ?? selection.responseStatusReason); // CARD_NOT_FOUND / CARD_DATA_MISSING
 }
 ```
+
+**Disarming and re-arming on the pay screen.** On Cancel, or when your own countdown expires,
+call `wallet.closePaySession()`. A "Try again" button calls `wallet.openPaySession()`, which
+resolves a `PaySessionResult` (`{ responseStatus, responseStatusReason, message }`):
+
+```ts
+await wallet.closePaySession();            // Cancel / countdown expired
+const session = await wallet.openPaySession(); // "Try again"
+if (session.responseStatus !== 'APPROVED') {
+  // NFC_DISABLED · NFC_UNAVAILABLE (always on iOS) · MODE_REFUSED · SCREEN_NOT_ACTIVE
+  showProblem(session.message ?? session.responseStatusReason);
+}
+```
+
+Keep `usePaySession` mounted on the pay screen as before. These two calls disarm and re-arm within
+it, and leaving the screen still closes it.
 
 `wallet.deactivateToken(ref)` removes it, resolving a `TokenStatusUpdateResponse`
 (`{ tokenUniqueReference, status, message, responseStatus, responseStatusReason }`) — the same name
@@ -1858,6 +1882,7 @@ means the call has no response code by design.
 | `wallet.tokenStatus(ref)` | `TokenStatusResult` | — | `responseStatus` | `responseStatusReason` |
 | `wallet.deactivateToken(ref)` | `TokenStatusUpdateResponse` | — | `responseStatus` | `responseStatusReason` |
 | `wallet.setActiveCard(cardId)` | `CardSelection` | — | `responseStatus` (`APPROVED` / `FAILED`) | `responseStatusReason` |
+| `wallet.openPaySession()` | `PaySessionResult` | — | `responseStatus` (`APPROVED` / `FAILED`) | `responseStatusReason` |
 | `wallet.processReceipt(...)` | `ReceiptScan` | — | `responseStatus` (`APPROVED` / `FAILED`) | `responseStatusReason` |
 | `wallet.reconcilePendingTransactions()` | `ReconcileResult` | — | — (a read) | `failureReason` when the reconcile could not run |
 
@@ -1917,6 +1942,10 @@ digitisation (tap, `chargeCustomerQr`, `createPaymentContext`, `payScannedContex
 | `PENDING` | — | `SDK_INTERNAL_ERROR` | the SDK failed after sending | wait; the SDK still resolves the payment |
 | `FAILED` | — | `NO_RESPONSE_RECEIVED` / `UPSTREAM_ERROR` | **add-card only**: no answer after sending | start a new digitisation |
 | `FAILED` | — | `CARD_NOT_FOUND` | `setActiveCard`: no card with that id is in this wallet | pass an `id` from `getCards()` |
+| `FAILED` | — | `NFC_DISABLED` | `openPaySession`: NFC is switched off (Android) | ask the user to turn NFC on, then open again |
+| `FAILED` | — | `NFC_UNAVAILABLE` | `openPaySession`: no NFC on this device — always on iOS, which cannot pay by tap | offer the QR rails |
+| `FAILED` | — | `MODE_REFUSED` | `openPaySession`: a SoftPOS payment is in progress (Android) | open again when it ends |
+| `FAILED` | — | `SCREEN_NOT_ACTIVE` | `openPaySession`: no screen is in front (Android) | open it from the live pay screen |
 | `FAILED` | — | `CARD_DATA_MISSING` | `setActiveCard` (Android): the card is listed but its payment data is not on this phone | remove the card and add it again |
 | `FAILED` | — | `INVALID_RECEIPT` | `processReceipt`: not a Veyra receipt QR, or a field is missing or unreadable | ask for the merchant's receipt QR |
 | `FAILED` | — | `RECEIPT_NOT_FROM_THIS_WALLET` | `processReceipt`: no payment made by this wallet matches it | tell the customer it is not their receipt |

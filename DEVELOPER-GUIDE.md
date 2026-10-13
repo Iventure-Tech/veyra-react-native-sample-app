@@ -651,8 +651,7 @@ treat it as "prompt the customer to choose" rather than as an error.
 nothing is sent. `'APPROVED'`: the card is now the one payments use. `'FAILED'`: it is not, and the
 reason says why — `CARD_NOT_FOUND` (no card with that reference in this wallet: pass a
 `tokenUniqueReference` you read from `getTokens()`) or, on Android only, `CARD_DATA_MISSING` (the card is listed but its payment data is
-not on this phone — remove it and add it again; `wallet.observeTapEvents` also fires `activationFailed`
-for that case). Only a setup mistake (no pay session, SDK not initialised) rejects.
+not on this phone — remove it and add it again). Only a setup mistake (no pay session, SDK not initialised) rejects.
 
 ```ts
 const selection = await wallet.setActiveToken(card.tokenUniqueReference);
@@ -681,7 +680,7 @@ answers `NFC_UNAVAILABLE`, `closePaySession` does nothing, `isPaySessionOpen()` 
 | `wallet.openPaySession()` | Re-arms tap-to-pay within the pay screen — e.g. a "Try again" after `closePaySession` | `PaySessionResult` |
 | `wallet.closePaySession()` | Disarms at once — on Cancel, or when your own countdown expires. A tap already under way finishes | `void` |
 | `wallet.isPaySessionOpen()` | Whether tap-to-pay is armed | `boolean` |
-| `wallet.observeTapEvents(listener)` / `wallet.stopObservingTapEvents()` | Card-reading events: `transactionStarted` / `transactionCompleted` / `activationFailed`. Throws `VeyraError` `UNSUPPORTED_ON_PLATFORM` on iOS, so subscribe only where `Platform.OS === 'android'` | a subscription / `void` |
+| `wallet.observeTapEvents(listener)` / `wallet.stopObservingTapEvents()` | Card-reading events: `transactionStarted` / `transactionCompleted`. Throws `VeyraError` `UNSUPPORTED_ON_PLATFORM` on iOS, so subscribe only where `Platform.OS === 'android'` | a subscription / `void` |
 
 Select the token with `setActiveToken` (§6.3); on Android that arms it for tapping.
 
@@ -1582,7 +1581,7 @@ per card (§6.2).
 
 | Helper | Events |
 |---|---|
-| `wallet.observeTapEvents` | `transactionStarted` / `transactionCompleted` / `activationFailed` — Android tap rail only; **throws `VeyraError` `UNSUPPORTED_ON_PLATFORM` on iOS** (a listener that could never fire would be a silent no-op), so guard it with `Platform.OS === 'android'` |
+| `wallet.observeTapEvents` | `transactionStarted` / `transactionCompleted` — Android tap rail only; **throws `VeyraError` `UNSUPPORTED_ON_PLATFORM` on iOS** (a listener that could never fire would be a silent no-op), so guard it with `Platform.OS === 'android'` |
 | `wallet.observePaymentRefusals(tur, …)` | `requireOnline` / `amountExceedCardLimit` / `deviceNotBound`, **per card**, on every rail that platform has |
 | `merchant.tap.onEvent` | `cardDetected` / `cardContactLost` / `unsupportedCard` / progress / `ended` / `result` (a `MerchantTapResult` with the triple — every attempt ends with one, `'NOT_SENT'` included; iOS `ended` is a reader session that closed without a card) |
 | `merchant.onQrExpired` (the wallet passes `onExpired` to `showQrToPay` instead) | one `expired` per rendered QR |
@@ -2344,6 +2343,7 @@ subscription, and `stopObservingX()` removes every listener of that kind.
 | `wallet.requestActivationCode(ref, medium, contact, reason)` | `wallet.requestActivationCode(ref, medium, reason)` — the issuer sends the code to the contact it holds for `medium` |
 | `wallet.observeActivation(ref)` + `wallet.onActivationEvent(cb)` | `wallet.observeActivation(ref, onActivated, onTimeout, onError?)` — the callbacks for that card, fired once; `stopActivationObserver(ref)` drops them |
 | `wallet.onTapEvent(cb)` | `wallet.observeTapEvents(cb)` / `stopObservingTapEvents()` (Android only, as before) |
+| tap event `activationFailed` | Removed — `setActiveToken` already answers `FAILED` / `CARD_DATA_MISSING` for that card |
 | `wallet.onQrExpired(cb)` | `wallet.showQrToPay(amountMinorUnits, onExpired)` — the callback belongs to the QR it was rendered with; a new `showQrToPay` replaces it and `cancelQrExpiry()` clears it |
 | `wallet.onTokenStatusChanged(cb)` | `wallet.observeTokenStatusChanged(cb)` / `stopObservingTokenStatusChanged()` |
 | `wallet.onTransactionResolved(cb)` | `wallet.observeTransactionResolved(cb)` / `stopObservingTransactionResolved()` |

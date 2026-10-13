@@ -83,9 +83,13 @@ export function PayScreen({
       .setActiveToken(activeId)
       .then((selection) => {
         if (selection.responseStatus === 'APPROVED') setArmedId(activeId);
+        else if (selection.responseStatusReason === 'CARD_DATA_MISSING') {
+          Alert.alert('Card unavailable', selection.message ?? 'Remove this card and add it again.');
+          reload();
+        }
       })
       .catch(() => {});
-  }, [focused, activeId, armedId]);
+  }, [focused, activeId, armedId, reload]);
 
   // A blurred screen is disarmed by the SDK — arm again on the next focus.
   useEffect(() => {
@@ -190,11 +194,6 @@ export function PayScreen({
         // A tap can change card state (a card that spent its last payment key flips to
         // `requiresOnline`, and the recent-transactions preview grows) — re-read the list so
         // that renders here, on the screen taps happen on, not on the next navigation.
-        reload();
-      }
-      if (e.type === 'activationFailed') {
-        setTapStatus(null);
-        Alert.alert('Card unavailable', e.message);
         reload();
       }
     });

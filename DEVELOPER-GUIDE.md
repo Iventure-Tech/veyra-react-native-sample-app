@@ -527,7 +527,7 @@ Rules of the model:
 - **While the session screen is focused the device stays ready** — a customer queueing
   at a terminal, or re-tapping after a decline, needs no re-arming.
 - **The screen stays awake while it can take a tap.** For tap acceptance (Android and
-  iOS), that's from `merchant.tap.start` until the payment ends or is cancelled (waiting
+  iOS), that's from `softpos.tap.start` until the payment ends or is cancelled (waiting
   for a card, reading it, and contacting the bank). For tap-to-pay (Android), it's while
   the pay session is open. A phone whose screen has gone off can't read a card or pay by
   tap. Otherwise the screen sleeps as usual. On iOS this uses the app's idle timer: the

@@ -578,9 +578,9 @@ iOS-only param: `bankName` (shown on the stored card). Android additionally requ
 | `wallet.requestActivationCode(ref, medium, reason?)` → `ActivationCodeResponse` | `medium` is one of the card's `activationMethods[].medium`; the issuer sends the code to the contact it holds for it. iOS supports `MASKED_EMAIL` / `MASKED_MOBILE_PHONE` media |
 | `wallet.activate(ref, code)` → `ActivateResponse` | submit the OTP |
 | `wallet.tokenStatus(ref)` → `TokenStatusResult` | one-shot server check: `tokenStatus` on `'APPROVED'`, five-valued (`ACTIVE` / `PENDING_ACTIVATION` / `SUSPENDED` / `DEACTIVATED` / `EXPIRED`, a newer value passed through verbatim) — say *why* a card is unavailable. A check that could not be made is `'FAILED'` with the reason and no `tokenStatus`; never `'PENDING'` |
-| `wallet.observeActivation(ref)` + `wallet.observeActivationEvents(cb)` | polls every 10s for ≤5min; events `activated` / `timeout` / `error`. `stopObservingActivationEvents()` removes every listener (the polling itself stops with `stopActivationObserver`) |
+| `wallet.observeActivation(ref, onActivated, onTimeout, onError?)` | polls every 10s for ≤5min and calls back once — `onActivated`, `onTimeout`, or `onError(message)` — which ends the observation. The same callbacks as the Android and iOS SDKs. Re-observing the card replaces its callbacks; `Veyra.signOut` and `Veyra.initialize` drop them |
 | `wallet.hasActivationObserver(ref)` → `boolean` | whether an activation observer is running for that card |
-| `pauseActivationObserver(ref)` / `resumeActivationObserver(ref)` / `stopActivationObserver(ref)` | the timeout clock keeps running while paused |
+| `pauseActivationObserver(ref)` / `resumeActivationObserver(ref)` / `stopActivationObserver(ref)` | the timeout clock keeps running while paused, and the callbacks are kept; stopping drops them |
 
 `wallet.checkTokenActive(ref)` (a boolean) is **gone** — read `tokenStatus(ref)` and compare
 `tokenStatus === 'ACTIVE'` on an `'APPROVED'` result.
@@ -1481,14 +1481,14 @@ wording comes from `orderLookupText` in `src/paymentResult.ts` (unit-tested).
 
 One `NativeEventEmitter` channel per family. Each wallet `observeX` returns a subscription —
 `remove()` it on unmount — and has a matching `stopObservingX()` that removes every listener of that
-kind at once (`stopObservingTapEvents`, `stopObservingActivationEvents`,
+kind at once (`stopObservingTapEvents`,
 `stopObservingTokenStatusChanged`, `stopObservingTransactionResolved`,
 `stopObservingCardKeyStateChanged`, and `stopObservingPaymentRefusals(tur)` per card) — the same
-names as the Android and iOS SDKs:
+names as the Android and iOS SDKs. Activation is not here: `observeActivation` takes its callbacks
+per card (§6.2).
 
 | Helper | Events |
 |---|---|
-| `wallet.observeActivationEvents` | `activated` / `timeout` / `error` |
 | `wallet.observeTapEvents` | `transactionStarted` / `transactionCompleted` / `activationFailed` — Android tap rail only; **throws `VeyraError` `UNSUPPORTED_ON_PLATFORM` on iOS** (a listener that could never fire would be a silent no-op), so guard it with `Platform.OS === 'android'` |
 | `wallet.observePaymentRefusals(tur, …)` | `requireOnline` / `amountExceedCardLimit` / `deviceNotBound`, **per card**, on every rail that platform has |
 | `merchant.tap.onEvent` | `cardDetected` / `cardContactLost` / `unsupportedCard` / progress / `ended` / `result` (a `MerchantTapResult` with the triple — every attempt ends with one, `'NOT_SENT'` included; iOS `ended` is a reader session that closed without a card) |
@@ -2281,7 +2281,7 @@ subscription, and `stopObservingX()` removes every listener of that kind.
 | `wallet.setActiveCard(card.id)` | `wallet.setActiveToken(token.tokenUniqueReference)` |
 | `Card` (with `id`) | `Token` (no `id` — use `tokenUniqueReference`, now always set) |
 | `wallet.requestActivationCode(ref, medium, contact, reason)` | `wallet.requestActivationCode(ref, medium, reason)` — the issuer sends the code to the contact it holds for `medium` |
-| `wallet.onActivationEvent(cb)` | `wallet.observeActivationEvents(cb)` / `stopObservingActivationEvents()` |
+| `wallet.observeActivation(ref)` + `wallet.onActivationEvent(cb)` | `wallet.observeActivation(ref, onActivated, onTimeout, onError?)` — the callbacks for that card, fired once; `stopActivationObserver(ref)` drops them |
 | `wallet.onTapEvent(cb)` | `wallet.observeTapEvents(cb)` / `stopObservingTapEvents()` (Android only, as before) |
 | `wallet.onQrExpired(cb)` | `wallet.showQrToPay(amountMinorUnits, onExpired)` — the callback belongs to the QR it was rendered with; a new `showQrToPay` replaces it and `cancelQrExpiry()` clears it |
 | `wallet.onTokenStatusChanged(cb)` | `wallet.observeTokenStatusChanged(cb)` / `stopObservingTokenStatusChanged()` |

@@ -144,23 +144,20 @@ export function PayScreen({
     for (const ref of pending) {
       if (observed.current.has(ref)) continue;
       observed.current.add(ref);
-      wallet.observeActivation(ref).catch(() => observed.current.delete(ref));
+      // Each callback ends the observation, so the card leaves the observed set either way.
+      wallet
+        .observeActivation(
+          ref,
+          () => {
+            observed.current.delete(ref);
+            reload(); // the card is tappable now — refresh so it stops rendering as pending
+          },
+          () => observed.current.delete(ref),
+          () => observed.current.delete(ref)
+        )
+        .catch(() => observed.current.delete(ref));
     }
-  }, [cards]);
-
-  useEffect(() => {
-    const sub = wallet.observeActivationEvents((e) => {
-      if (!observed.current.has(e.tokenUniqueReference)) return;
-      if (e.event === 'activated') {
-        observed.current.delete(e.tokenUniqueReference);
-        reload(); // the card is tappable now — refresh so it stops rendering as pending
-      }
-      if (e.event === 'timeout' || e.event === 'error') {
-        observed.current.delete(e.tokenUniqueReference);
-      }
-    });
-    return () => sub.remove();
-  }, [reload]);
+  }, [cards, reload]);
 
   // Polling follows the screen. The SDK keeps the 5-minute timeout clock running while
   // paused, so a card activated during the pause is still picked up on the next resume.

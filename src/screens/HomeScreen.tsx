@@ -2,7 +2,7 @@ import React, { useCallback, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import Veyra, { merchant, type VeyraMode } from 'veyra-sdk-react-native';
+import Veyra, { softpos, type VeyraMode } from 'veyra-sdk-react-native';
 import type { RootStackParamList } from '../../App';
 import { useSession } from '../session';
 import { theme } from '../theme';
@@ -31,8 +31,10 @@ export function HomeScreen({
         setMode('NONE'); // signed out: the SDK has stopped everything
         return;
       }
-      // Re-read on every customer change: each customer has their own merchant.
-      merchant.isRegistered().then(setRegistered).catch(() => setRegistered(false));
+      // Re-read on every customer change: each customer has their own merchant. The init-free
+      // read — it needs no initialised SDK, so Home can decide whether to offer "Get paid" without
+      // initialising anything (the same check the native samples make).
+      softpos.isMerchantRegistered(customerId).then(setRegistered).catch(() => setRegistered(false));
       const poll = setInterval(() => {
         Veyra.currentMode().then(setMode).catch(() => {});
       }, 500);

@@ -6,7 +6,7 @@
 import { describe, expect, it } from '@jest/globals';
 import type {
   CustomerQrChargeOutcome,
-  MerchantTapResult,
+  TapResult,
   OrderPaymentStatus,
   PaymentContextStatus,
   PaymentOutcome,
@@ -32,7 +32,7 @@ describe('AUTO_RETURN_MS', () => {
   });
 });
 
-const tap = (over: Partial<MerchantTapResult> = {}): MerchantTapResult => ({
+const tap = (over: Partial<TapResult> = {}): TapResult => ({
   responseCode: null,
   responseStatus: null,
   responseStatusReason: null,

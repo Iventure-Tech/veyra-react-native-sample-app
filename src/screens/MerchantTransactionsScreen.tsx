@@ -5,7 +5,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import QRCode from 'react-native-qrcode-svg';
 import type { RootStackParamList } from '../../App';
 import {
-  merchant,
+  softpos,
   VeyraError,
   type MerchantReceipt,
   type MerchantTransaction,
@@ -41,7 +41,7 @@ export function MerchantTransactionsScreen({
     const orderId = lookupOrderId.trim();
     setLookingUp(true);
     try {
-      setLookupResult(orderLookupText(await merchant.paymentStatus(orderId)));
+      setLookupResult(orderLookupText(await softpos.paymentStatus(orderId)));
     } catch (e) {
       setLookupResult((e as VeyraError).message);
     } finally {
@@ -58,7 +58,7 @@ export function MerchantTransactionsScreen({
     setCheckingStatus(true);
     setStatusNote(null);
     try {
-      const lookup = await merchant.refreshTransactionStatus(reference);
+      const lookup = await softpos.refreshTransactionStatus(reference);
       // A read: the stored row as it now stands, or why the check could not be made. A check that
       // could not be made never changes the row — say why and keep showing it.
       if (lookup.failureReason) {
@@ -99,7 +99,7 @@ export function MerchantTransactionsScreen({
     setCheckingCredit(true);
     setCreditNote(null);
     try {
-      const lookup = await merchant.refreshCreditConfirmation(reference);
+      const lookup = await softpos.refreshCreditConfirmation(reference);
       // A read: the stored row as it now stands, or why the check could not be made. A check that
       // could not be made never changes the row — say why and keep showing it.
       if (lookup.failureReason) {
@@ -135,14 +135,14 @@ export function MerchantTransactionsScreen({
 
   useFocusEffect(
     useCallback(() => {
-      merchant.getTransactions(50).then(setRows).catch(() => setRows([]));
+      softpos.getTransactions(50).then(setRows).catch(() => setRows([]));
       if (openReceiptFor) showReceipt(openReceiptFor);
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [openReceiptFor])
   );
 
   const showReceipt = async (reference: string) => {
-    const r = await merchant.getReceipt(reference).catch(() => null);
+    const r = await softpos.getReceipt(reference).catch(() => null);
     if (r) setReceipt(r);
   };
 

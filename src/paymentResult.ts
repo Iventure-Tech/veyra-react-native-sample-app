@@ -1,6 +1,6 @@
 import type {
   CustomerQrChargeOutcome,
-  MerchantTapResult,
+  TapResult,
   OrderPaymentStatus,
   OriginalPayment,
   PaymentContextStatus,
@@ -34,7 +34,7 @@ export interface PaymentResultParams {
   receiptFor?: string;
   /**
    * Merchant transaction reference of a sale that is **not final yet**. The result screen
-   * subscribes to `merchant.onTransactionResolved` for it (and reads the stored row on mount,
+   * subscribes to `softpos.observeTransactionResolved` for it (and reads the stored row on mount,
    * for the answer that landed before the screen opened) and shows the settled outcome in
    * place, so the merchant is not left staring at "Pending" until they navigate away.
    */
@@ -42,7 +42,7 @@ export interface PaymentResultParams {
   /**
    * Present when an approved sale may be waiting on beneficiary credit confirmation — the
    * result screen then shows "Confirming credit with merchant bank…" and flips it when the
-   * SDK's `merchant.onCreditConfirmation` event (fired from its background poll) reports the
+   * SDK's `softpos.observeCreditConfirmation` event (fired from its background poll) reports the
    * funds landed. `supported: true` means the outcome itself carried the flag (tap, customer
    * QR) — wait immediately. `supported: null` means the rail's settle cannot carry it (a
    * merchant-presented QR: the contexts endpoint has no credit fields, the SDK learns them
@@ -103,7 +103,7 @@ function lines(...candidates: Array<string | null | undefined>): string[] {
  * and `NOT_SENT` (never reached the gateway — retry with the same order id).
  */
 export function tapResultToParams(
-  result: MerchantTapResult,
+  result: TapResult,
   amountMinorUnits: number
 ): PaymentResultParams {
   const code = result.responseCode;
@@ -398,7 +398,7 @@ export function keepsOrderId(status: ResponseStatus | null | undefined): boolean
 }
 
 /**
- * What to tell the merchant after `merchant.paymentStatus(orderId)` — "what happened to this
+ * What to tell the merchant after `softpos.paymentStatus(orderId)` — "what happened to this
  * order?". Branch on the order's `responseStatus`: paid, may still be going through, or not paid
  * (pay again with the same order id). A read: `failureReason` says why the gateway could not be
  * asked, and `value` is then what this device holds for the order, if anything.

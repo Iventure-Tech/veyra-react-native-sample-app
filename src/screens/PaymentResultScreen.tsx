@@ -3,7 +3,7 @@ import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import Svg, { Circle } from 'react-native-svg';
-import { merchant } from 'veyra-sdk-react-native';
+import { softpos } from 'veyra-sdk-react-native';
 import type { RootStackParamList } from '../../App';
 import { AUTO_RETURN_MS, type PaymentResultOutcome } from '../paymentResult';
 import { theme } from '../theme';
@@ -64,14 +64,14 @@ export function PaymentResultScreen({
   useEffect(() => {
     if (!resolvesFor) return;
     let cancelled = false;
-    merchant
+    softpos
       .getTransaction(resolvesFor)
       .then((row) => {
         if (cancelled || !row?.status || row.status === 'PENDING') return;
         setResolved({ status: row.status, reason: row.responseStatusReason ?? null });
       })
       .catch(() => {});
-    const sub = merchant.onTransactionResolved((e) => {
+    const sub = softpos.observeTransactionResolved((e) => {
       if (e.merchantTransactionReference !== resolvesFor) return;
       setResolved({ status: e.status, reason: e.reason });
     });
@@ -92,7 +92,7 @@ export function PaymentResultScreen({
   // reference (or credit id) — the SDK-wide event can fire for a sale from an earlier session.
   useEffect(() => {
     if (!creditConfirmation) return;
-    const sub = merchant.onCreditConfirmation((e) => {
+    const sub = softpos.observeCreditConfirmation((e) => {
       const matches =
         e.merchantTransactionReference === creditConfirmation.reference ||
         (!!creditConfirmation.creditTransactionId &&
@@ -112,7 +112,7 @@ export function PaymentResultScreen({
   useEffect(() => {
     if (!creditConfirmation) return;
     const timer = setInterval(async () => {
-      const row = await merchant.getTransaction(creditConfirmation.reference).catch(() => null);
+      const row = await softpos.getTransaction(creditConfirmation.reference).catch(() => null);
       if (!row) return;
       if (row.creditConfirmationStatus) {
         setCreditState(row.creditConfirmationStatus === 'RECEIVED' ? 'received' : 'unable');

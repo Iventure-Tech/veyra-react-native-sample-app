@@ -199,17 +199,20 @@ test-user@iventure.tech*.
 ```ts
 import Veyra from 'veyra-sdk-react-native';
 
-await Veyra.initialize({
+// (customerId, config, provider) — the same order as Android and iOS.
+await Veyra.initialize(
   customerId,                              // the customer your app has signed in
-  provider,                                // required, one for both SDKs: §4.2
-  softpos: { environment: 'TEST', paymentAppProviderId },
-  wallet: {
-    environment: 'TEST',
-    paymentAppProviderId, tokenRequestorId,
-    recommendationStandardVersion: '1.0',  // Android (fixed on iOS)
-    appleTeamId: 'YOURTEAMID',             // iOS
+  {
+    softpos: { environment: 'TEST', paymentAppProviderId },
+    wallet: {
+      environment: 'TEST',
+      paymentAppProviderId, tokenRequestorId,
+      recommendationStandardVersion: '1.0',  // Android (fixed on iOS)
+      appleTeamId: 'YOURTEAMID',             // iOS
+    },
   },
-});
+  provider,                                // required, one for both SDKs: §4.2
+);
 ```
 
 Call it at every app start with the customer your app has signed in (this sample does it
@@ -227,24 +230,24 @@ your own login session, and you tell the SDK on every launch.
 
 | Your app's moment | Call | What the SDK does |
 |---|---|---|
-| App starts, a customer is signed in | `Veyra.initialize({ customerId, softpos, wallet })` | opens that customer's data |
+| App starts, a customer is signed in | `Veyra.initialize(customerId, config, provider)` | opens that customer's data |
 | App starts, nobody is signed in | nothing | stays signed out — every call rejects with `NOT_SIGNED_IN` |
-| Customer logs in | `Veyra.initialize({ customerId, … })` | opens that customer's data |
-| Same customer again (relaunch, Activity recreated) | `Veyra.initialize({ customerId, … })` | nothing is stopped — idempotent |
-| A different customer logs in (switch) | `Veyra.initialize({ customerId: other, … })` | stops the previous customer's work, then opens the new customer's data |
+| Customer logs in | `Veyra.initialize(customerId, config, provider)` | opens that customer's data |
+| Same customer again (relaunch, Activity recreated) | `Veyra.initialize(customerId, config, provider)` | nothing is stopped — idempotent |
+| A different customer logs in (switch) | `Veyra.initialize(otherCustomerId, config, provider)` | stops the previous customer's work, then opens the new customer's data |
 | Customer logs out | `Veyra.signOut()` | stops everything for that customer; their data **stays on the device** (keys kept) for when they sign in again |
 
 ```ts
 import Veyra from 'veyra-sdk-react-native';
 
 // on launch, if your login session has a customer
-await Veyra.initialize({ customerId: session.customerId, softpos, wallet });
+await Veyra.initialize(session.customerId, { softpos, wallet }, provider);
 
 // log out
 await Veyra.signOut();
 
 // switch — just initialise with the other customer
-await Veyra.initialize({ customerId: otherCustomerId, softpos, wallet });
+await Veyra.initialize(otherCustomerId, { softpos, wallet }, provider);
 ```
 
 - **`customerId` is your identifier** for the logged-in customer — any stable string your
@@ -303,13 +306,15 @@ const provider: VeyraAssertionProvider = {
 const provider: VeyraProxyProvider = { providerType: 'PROXY', send: forward };
 
 // Then, whichever kind:
-await Veyra.initialize({
+await Veyra.initialize(
   customerId,
+  {
+    softpos: { environment: 'TEST', paymentAppProviderId },
+    wallet: { environment: 'TEST', paymentAppProviderId, tokenRequestorId,
+              recommendationStandardVersion: '1.0', appleTeamId: 'YOURTEAMID' },
+  },
   provider,
-  softpos: { environment: 'TEST', paymentAppProviderId },
-  wallet: { environment: 'TEST', paymentAppProviderId, tokenRequestorId,
-            recommendationStandardVersion: '1.0', appleTeamId: 'YOURTEAMID' },
-});
+);
 ```
 
 `forward` sends the envelope to `POST {your API gateway}/issuertokengateway/v1/proxy` and resolves with
@@ -2327,6 +2332,16 @@ The other reads — `wallet.getBanks`, `merchant.getSettlementBanks`, `wallet.ve
 `wallet.tokenStatus`, `merchant.refreshStatus`, `merchant.inspectCustomerQr` — do carry
 `responseStatus`, because their answer is a decision (a list, an eligibility, a status). They
 follow the same rule: never `PENDING`, and retrying as is is safe.
+
+### Migrating from 3.0.0 — Setup
+
+Setup takes the same arguments in the same order on Android, iOS and React Native:
+`(customerId, config, provider)`.
+
+| 3.0.0 | 3.0.1 |
+|---|---|
+| `Veyra.initialize({ customerId, provider, softpos, wallet })` | `Veyra.initialize(customerId, { softpos, wallet }, provider)` |
+| `VeyraConfig` type | `VeyraSdkConfig` (`{ softpos, wallet }`); `customerId` and `provider` are arguments |
 
 ### Migrating from 3.0.0 — Wallet
 

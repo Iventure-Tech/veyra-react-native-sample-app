@@ -59,7 +59,7 @@ export function PayScreen({
   useEffect(() => {
     const subs = [
       wallet.observeTokenStatusChanged(reload),
-      wallet.observeCardKeyStateChanged(reload),
+      wallet.observeTokenKeyStateChanged(reload),
     ];
     return () => subs.forEach((s) => s.remove());
   }, [reload]);

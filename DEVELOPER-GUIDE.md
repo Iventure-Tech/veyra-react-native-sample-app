@@ -680,7 +680,7 @@ track what you already observe instead of re-issuing on every render. See `PaySc
 |---|---|---|
 | `wallet.getTokens()` | Every token (card) in this wallet. On the phone, no network call | `Token[]` |
 | `wallet.getActiveToken()` | The token payments use now; `null` when none is selected | `Token \| null` |
-| `wallet.setActiveToken(ref)` | Selects the token payments use; on Android it also arms it for tapping (pay session required — §6.4). On the phone, nothing is sent | `CardSelection` |
+| `wallet.setActiveToken(ref)` | Selects the token payments use; on Android it also arms it for tapping (pay session required — §6.4). On the phone, nothing is sent | `TokenSelection` |
 | `wallet.getToken(ref)` | One token; `null` when no token on this device has that reference. On the phone | `Token \| null` |
 | `wallet.tokenStatus(ref)` | One-shot server check, five-valued: `ACTIVE` / `PENDING_ACTIVATION` / `SUSPENDED` / `DEACTIVATED` / `EXPIRED` (a newer value passed through verbatim) on `'APPROVED'` — say *why* a token is unavailable. A check that could not be made is `'FAILED'` with the reason; never `'PENDING'` | `TokenStatusResult` |
 | `wallet.deactivateToken(ref)` | Deactivates the token server-side and removes it from the device — only `'APPROVED'` removed it | `TokenStatusUpdateResponse` |
@@ -698,9 +698,15 @@ track what you already observe instead of re-issuing on every render. See `PaySc
    remove the card and add it again on this phone** — going online or paying a smaller amount
    does not help. The SDK has stopped requesting keys for it, `requiresOnline` is always `false`
    while this is set, and it clears only when the card is removed.
-4. `!isActive` — blocked server-side; `status` says why on both platforms (`SUSPENDED`:
+4. `!isActive` — the token is not activated and able to pay; `status` (a `TokenStatus`, or `null`
+   when the SDK has never synced it) says why on both platforms (`SUSPENDED`:
    "contact your bank" · `PENDING_ACTIVATION`: "activate this card" · `EXPIRED`: "re-add the card").
 5. Otherwise payable.
+
+`isActive` means **activated and can pay**, on both platforms. Which token payments use is a
+separate flag, `isSelected` — `true` on the one token `setActiveToken` chose. `TokenStatus` is
+`'ACTIVE' | 'SUSPENDED' | 'EXPIRED' | 'PENDING_ACTIVATION' | 'DEACTIVATED'`; a newer value is passed
+through as a plain string.
 
 `wallet.getActiveToken()` → `Token | null` reads the currently selected card — the counterpart to
 `setActiveToken`, and the way a screen answers "which card would pay right now?" without inferring it
@@ -708,7 +714,7 @@ from the list. `null` means no card is selected (never chosen, or the chosen one
 treat it as "prompt the customer to choose" rather than as an error.
 
 `wallet.setActiveToken(card.tokenUniqueReference)` selects the card; on Android it also arms tap-to-pay
-(pay session required — `SESSION_REQUIRED` otherwise). It resolves a `CardSelection`
+(pay session required — `SESSION_REQUIRED` otherwise). It resolves a `TokenSelection`
 (`{ responseStatus, responseStatusReason, message }`) — the selection happens on the phone and
 nothing is sent. `'APPROVED'`: the card is now the one payments use. `'FAILED'`: it is not, and the
 reason says why — `CARD_NOT_FOUND` (no card with that reference in this wallet: pass a
@@ -762,7 +768,9 @@ if (session.responseStatus !== 'APPROVED') {
 Keep `usePaySession` mounted on the pay screen as before. These two calls disarm and re-arm within
 it, and leaving the screen still closes it.
 
-The tap rail's `transactionCompleted` (`'APPROVED'` / `'DECLINED'` / `'ERROR'`) is a card-reading
+Both tap events name the token by `tokenUniqueReference`; `transactionCompleted` also carries
+`amountMinorUnits`, `cardScheme` and `reference`. The tap rail's `transactionCompleted`
+(`'APPROVED'` / `'DECLINED'` / `'ERROR'`) is a card-reading
 event — what the card told the terminal — not a call's outcome: the payment's outcome arrives on
 the history row and on `wallet.observeTransactionResolved` (§6.7).
 
@@ -839,10 +847,13 @@ again), `AUTH_FAILED` (attempted, rejected — offer a retry) and `AUTH_UNAVAILA
 *and* no screen lock on this device — send them to system settings, a retry cannot help). Nothing
 is sent in any of the three (§9.2, Table A).
 
-The sheet's wording is the SDK's own: the React Native wallet config has no field to
-change it.
+The sheet's wording is the SDK's own unless you set it. `VeyraWalletConfig` takes
+`cdcvmPayTitle` / `cdcvmPaySubtitle` (scan-to-pay) and `cdcvmShowQrTitle` / `cdcvmShowQrSubtitle`
+(show-QR-to-pay); leave them out to keep the SDK's wording. `cdcvmAllowDeviceCredential`
+(default `true`) controls whether the sheet offers the device passcode as well as biometrics.
 
-A verified inspection carries `merchantOrderId` — the merchant's order ID signed into the QR, and
+A verified inspection carries the amount (`amountMinorUnits`, plus `amountDisplay` for the
+screen), `currencyCode` (ISO 4217 numeric, three digits, e.g. `'566'`) and `merchantOrderId` — the merchant's order ID signed into the QR, and
 what `wallet.cancelPayment` takes to cancel paying it (§9.8). It is `null` for a QR from an older
 merchant app that carries none; that payment cannot be cancelled, so disable your Cancel while it
 is being paid (as the sample does).
@@ -863,7 +874,12 @@ payer they were refused when they were not. `'APPROVED'`, `'DECLINED'` and `'FAI
 final; `'NOT_SENT'` means nothing was paid — refused on the phone (`ONLINE_REQUIRED`,
 `DEVICE_NOT_BOUND`, `CARD_CANNOT_PAY`…), offline, authentication dismissed, or an unknown or
 already-used handle (`INVALID_REQUEST`) — so fix the reason and pay again; anything else —
-`'PENDING'`, or an absent status — is pending.
+`'PENDING'` — is pending.
+
+An approved `PaymentOutcome` also carries `creditTransactionId` (the merchant-bank credit's
+identifier, for support) and `isCreditConfirmationSupported` (whether the merchant's bank can
+confirm the credit at all). Both are settlement news — never the payment's outcome; the credit
+line itself lives on the history row (§6.6).
 
 ### 6.6 History, receipts and reconciliation
 
@@ -881,6 +897,10 @@ already-used handle (`INVALID_REQUEST`) — so fix the reason and pay again; any
 PENDING rows), `processReceipt(qrPayload, expectedHash?)` to verify-and-store a scanned
 merchant receipt, `getReceipts(limit?)`, `getReceiptForTransaction(hash)`.
 `entryMethod` is `'TAP' | 'QR_GENERATED' | 'QR_SCANNED'`.
+A `TransactionSummary` carries `amountMinorUnits`, `currencyCode` (ISO 4217 numeric, three digits,
+e.g. `'566'`) and `tokenUniqueReference` (the token that paid). A `TransactionReceipt` carries
+`totalAmountMinorUnits` (a number, in minor units), `totalAmountFormatted` for display, and
+`currencyCode`.
 
 Both of these **resolve**; only a setup mistake rejects.
 
@@ -1059,8 +1079,12 @@ const { value, failureReason } = await wallet.refreshCreditConfirmation(tx.trans
 |---|---|---|
 | `wallet.observeTokenStatusChanged(listener)` / `wallet.stopObservingTokenStatusChanged()` | The issuer changed a token's status — suspended, reactivated, expired, deactivated | `TokenStatusChangedEvent` |
 | `wallet.observeTransactionResolved(listener)` / `wallet.stopObservingTransactionResolved()` | A wallet payment left `PENDING` reached its final outcome, keyed on `transactionHash` | `WalletTransactionResolvedEvent` |
-| `wallet.observeCardKeyStateChanged(listener)` / `wallet.stopObservingCardKeyStateChanged()` | A token ran out of payment keys, or a refresh replenished them | `CardKeyStateEvent` |
+| `wallet.observeTokenKeyStateChanged(listener)` / `wallet.stopObservingTokenKeyStateChanged()` | A token ran out of payment keys, or a refresh replenished them | `TokenKeyStateEvent` |
 | `wallet.observePaymentRefusals(ref, listener)` / `wallet.stopObservingPaymentRefusals(ref)` | A payment with that token was refused before anything was sent | `WalletPaymentRefusal` |
+
+A `WalletPaymentRefusal` is one of three shapes, told apart by `type` (`requireOnline`,
+`amountExceedCardLimit`, `deviceNotBound`); each carries `tokenUniqueReference`,
+`amountMinorUnits`, `rail` and `message`, and `amountExceedCardLimit` adds `cardLimitMinorUnits`.
 
 Each `observeX` returns a subscription — `remove()` it on unmount — and `stopObservingX()` removes
 every listener of that kind at once. The same names as the Android and iOS SDKs. Subscribe to the
@@ -1094,7 +1118,7 @@ useEffect(() => {
 
 - **Rails:** `TAP`, `CPM_QR` and `MPM_QR` on Android; the two QR rails on iOS, which has no tap-to-pay. Read `refusal.rail` if you need to know which.
 - **These describe *this payment*, not the card.** `Token.requiresOnline` answers the different question "can this card pay anything offline at all?" and stays `false` for a card that can still make smaller payments — so don't grey a card out on the strength of one refusal.
-- **`deviceNotBound` is the exception — it is a card state too.** The backend issues a card's payment keys only to the device the card was added on; a request from another device, or from this phone after the app was reinstalled, is refused. The SDK remembers the refusal for that card, stops requesting keys for it, and sets `Token.deviceNotBound` (§6.3). The shape is `{ type: 'deviceNotBound'; tokenId; tokenUniqueReference; amountMinorUnits; rail; message }`, with `message` prefixed `DEVICE_NOT_BOUND`. Fires on both platforms (`TAP` on Android only).
+- **`deviceNotBound` is the exception — it is a card state too.** The backend issues a card's payment keys only to the device the card was added on; a request from another device, or from this phone after the app was reinstalled, is refused. The SDK remembers the refusal for that card, stops requesting keys for it, and sets `Token.deviceNotBound` (§6.3). The shape is `{ type: 'deviceNotBound'; tokenUniqueReference; amountMinorUnits; rail; message }`, with `message` prefixed `DEVICE_NOT_BOUND`. Fires on both platforms (`TAP` on Android only).
 - **`tokenUniqueReference: null`** means the SDK could not attribute the refusal to a card. Such a refusal reaches **every** registered handler rather than none: the payer was refused either way.
 - `remove()` is idempotent and releases the native registration once that card's last listener has gone.
 
@@ -1148,7 +1172,9 @@ Every call that talks to the gateway resolves with the triple:
 | `activate()` / `deactivate()` / `updateMerchant(update)` | `MerchantStatusResult` | as `refreshStatus`, plus `'PENDING'` — sent with no usable answer: read the status before trying again. A missing `updateMerchant` field is `'FAILED'` / `INVALID_REQUEST` |
 
 `isRegistered()`, `getStoredMerchantData()`, `getStoredMerchantId()`, `hasStoredMerchant()` and
-`isMerchantActive()` are local reads and resolve the stored value directly.
+`isMerchantActive()` are local reads and resolve the stored value directly. A `StoredMerchant`
+carries the profile as registered, including `bvn` (when one was supplied) and `cacNumber` (a
+`BUSINESS` merchant only).
 
 **Before `Veyra.initialize` — the Home screen.** `softpos.isMerchantRegistered(customerId)` and
 `softpos.getStoredMerchantData(customerId)` (with a customer id) read a customer's merchant **without initialising anything** —
@@ -1220,16 +1246,16 @@ threw); a connection that was provably never opened is `'NOT_SENT'` / `SDK_UNABL
 
 The `result` event's `TapResult` carries the triple on **both** platforms:
 
-- **`responseStatus`** — what you branch on. `status` is a deprecated alias with the same value.
+- **`responseStatus`** — what you branch on. Always set, never `null`.
 - **`responseStatusReason`** — the named cause (`'INSUFFICIENT_FUNDS'`, `'NO_RESPONSE_RECEIVED'`,
   `'CANCELLED'`, `'CARD_READ_FAILED'`…), a plain string. Display and log it.
 - **`responseCode`** — the wire code, for receipts and support. `null` on `'NOT_SENT'`.
 - **`originalPayment`** — on a `DUPLICATE_MERCHANT_ORDER_ID` refusal, the payment already holding
   the order id (§7.3); `null` otherwise.
 
-On iOS the bridge has no `amountDisplay`, `cardScheme`, `transactionId` or `merchantStatus` for a
-tap — those read `null`; read the settled row (`softpos.getTransaction(reference)`) when you
-need them. The 2.x `reason` and `sdkErrorCode` fields on the event are gone: read
+It also carries `amountMinorUnits` (the amount tapped, a number in minor units), `cardScheme`,
+`maskedTokenLast4`, `merchantTransactionReference`, `transactionId` and `merchantStatus`, on
+Android and iOS alike. The 2.x `reason` and `sdkErrorCode` fields on the event are gone: read
 `responseStatusReason`.
 
 **Show a terminal outcome on a screen, not in an alert.** `result` is where the payment
@@ -1289,7 +1315,7 @@ taps toward your launcher activity and away from the session.
   customer can pay it again. Once it has expired, create a new QR for the **same** order id.
 - **Charge a customer QR (consumer-presented):** `inspectCustomerQr(payload)` →
   `CustomerQrInspection`. `'APPROVED'` carries `qr` (`{ handle, maskedCard, amountMinorUnits,
-  currencyNumeric, cardholderName }`) — confirm its amount on screen. A payload that is not a
+  currencyCode, cardholderName }` — `currencyCode` is ISO 4217 numeric, three digits, e.g. `'566'`) — confirm its amount on screen. A payload that is not a
   Veyra payment QR is `'FAILED'` / `INVALID_REQUEST` with `qr: null`: show a transient hint and
   stay armed for another scan. Nothing is sent either way (an inspection is checked on the phone, so
   it is never `'NOT_SENT'`). Then
@@ -1729,7 +1755,7 @@ One `NativeEventEmitter` channel per family. Each wallet `observeX` returns a su
 `remove()` it on unmount — and has a matching `stopObservingX()` that removes every listener of that
 kind at once (`stopObservingTapEvents`,
 `stopObservingTokenStatusChanged`, `stopObservingTransactionResolved`,
-`stopObservingCardKeyStateChanged`, and `stopObservingPaymentRefusals(tur)` per card) — the same
+`stopObservingTokenKeyStateChanged`, and `stopObservingPaymentRefusals(tur)` per card) — the same
 names as the Android and iOS SDKs. Activation is not here: `observeActivation` takes its callbacks
 per card (§6.2).
 The SoftPOS observers follow the same pattern: `softpos.stopObservingTransactionResolved()`,
@@ -1746,7 +1772,7 @@ subscription ends just that one (calling it twice is harmless).
 | `softpos.observeCreditConfirmation` | one terminal credit confirmation per sale — `RECEIVED`, or the final 30-day `UNABLE_TO_CONFIRM` (see §7.4) |
 | `wallet.observeTokenStatusChanged` | the issuer changed a card's status — suspended, reactivated, expired, deactivated (see §8.1) |
 | `wallet.observeTransactionResolved` | one settlement per pending **wallet** payment — the payer-side twin of `softpos.observeTransactionResolved`, keyed on `transactionHash` (see §8.1) |
-| `wallet.observeCardKeyStateChanged` | a card ran out of payment keys, or a refresh replenished them (see §8.1) |
+| `wallet.observeTokenKeyStateChanged` | a card ran out of payment keys, or a refresh replenished them — a `TokenKeyStateEvent` (see §8.1) |
 | `softpos.observeMerchantStatusChanged` | the merchant was deactivated, suspended or activated (see §8.1) |
 
 
@@ -1784,7 +1810,7 @@ const subs = [
     // is the merchant's side of a payment and keys on a reference a wallet never sees.
     finishPendingRow(e.transactionHash, e.status, e.reason);
   }),
-  wallet.observeCardKeyStateChanged((e) => {
+  wallet.observeTokenKeyStateChanged((e) => {
     setNeedsOnline(e.tokenUniqueReference, e.requiresOnline);
     // A card that becomes not-bound arrives as { requiresOnline: false, deviceNotBound: true }.
     if (e.deviceNotBound) markCardNeedsReAdd(e.tokenUniqueReference);
@@ -1797,7 +1823,7 @@ const subs = [
 // on unmount: subs.forEach((s) => s.remove());
 ```
 
-**One limit to know about `observeCardKeyStateChanged`**, because it changes how you word your UI: it
+**One limit to know about `observeTokenKeyStateChanged`**, because it changes how you word your UI: it
 fires when a payment consumes a key and when a refresh delivers new ones — the moments the SDK is
 actually executing. Payment keys *also* expire by clock, which happens with no SDK code running, so
 **nothing fires for that**; such a card simply reads as `requiresOnline` on your next
@@ -1893,7 +1919,7 @@ flight resolves `MODE_REFUSED`; a merchant call with no merchant registered reso
 `FAILED` on any other call.
 
 `wallet.processReceipt`, `wallet.reconcilePendingTransactions` and `wallet.setActiveToken` resolve
-too — a `ReceiptScan`, a `ReconcileResult` and a `CardSelection` (§6.3, §6.6, §9.7); they reject
+too — a `ReceiptScan`, a `ReconcileResult` and a `TokenSelection` (§6.3, §6.6, §9.7); they reject
 only on a setup error.
 
 **A cancel answer is not an error.** `TOO_LATE_TO_CANCEL_REQUEST_ALREADY_SENT` and
@@ -2143,7 +2169,7 @@ means the call has no response code by design.
 | `wallet.requestActivationCode(...)` / `wallet.activate(...)` | `ActivationCodeResponse` / `ActivateResponse` | — | `responseStatus` (and `status`: `'SUCCESS'` / `'FAILURE'`) | `responseStatusReason` (and the typed `failureCode`) |
 | `wallet.tokenStatus(ref)` | `TokenStatusResult` | — | `responseStatus` | `responseStatusReason` |
 | `wallet.deactivateToken(ref)` | `TokenStatusUpdateResponse` | — | `responseStatus` | `responseStatusReason` |
-| `wallet.setActiveToken(tokenUniqueReference)` | `CardSelection` | — | `responseStatus` (`APPROVED` / `FAILED`) | `responseStatusReason` |
+| `wallet.setActiveToken(tokenUniqueReference)` | `TokenSelection` | — | `responseStatus` (`APPROVED` / `FAILED`) | `responseStatusReason` |
 | `wallet.openPaySession()` | `PaySessionResult` | — | `responseStatus` (`APPROVED` / `FAILED`) | `responseStatusReason` |
 | `wallet.processReceipt(...)` | `ReceiptScan` | — | `responseStatus` (`APPROVED` / `FAILED`) | `responseStatusReason` |
 | `wallet.reconcilePendingTransactions()` | `ReconcileResult` | — | — (a read) | `failureReason` when the reconcile could not run |
@@ -2332,7 +2358,7 @@ cases (§6.2); a call that never reached Veyra is `'FAILED'` with a `responseSta
 (`NO_NETWORK_CONNECTION`, `NOT_AUTHENTICATED`…) and no `failureCode`.
 
 The SDK refreshes a card's payment keys itself; that call's result is not returned to your app.
-You see it as card state instead — `Token.requiresOnline`, `wallet.observeCardKeyStateChanged` and
+You see it as card state instead — `Token.requiresOnline`, `wallet.observeTokenKeyStateChanged` and
 `wallet.observeTokenStatusChanged` (§8.1). An expired card is never refreshed: the customer adds it
 again.
 
@@ -2484,6 +2510,7 @@ interface VeyraLookup<T> {
   value: T | null;               // the answer; for a refresh, the stored row as it now stands
   failureReason: string | null;  // why the check could not be made; null when it was made
   message: string | null;        // a human-readable description of the failure, for logs
+  checked: boolean;              // true when the check was made and answered (failureReason is null)
 }
 ```
 
@@ -2548,9 +2575,44 @@ subscription, and `stopObservingX()` removes every listener of that kind.
 | `wallet.onQrExpired(cb)` | `wallet.showQrToPay(amountMinorUnits, onExpired)` — the callback belongs to the QR it was rendered with; a new `showQrToPay` replaces it and `cancelQrExpiry()` clears it |
 | `wallet.onTokenStatusChanged(cb)` | `wallet.observeTokenStatusChanged(cb)` / `stopObservingTokenStatusChanged()` |
 | `wallet.onTransactionResolved(cb)` | `wallet.observeTransactionResolved(cb)` / `stopObservingTransactionResolved()` |
-| `wallet.onCardKeyStateChanged(cb)` | `wallet.observeCardKeyStateChanged(cb)` / `stopObservingCardKeyStateChanged()` |
+| `wallet.onCardKeyStateChanged(cb)` | `wallet.observeTokenKeyStateChanged(cb)` / `stopObservingTokenKeyStateChanged()` (3.0.1 — see below) |
 | `wallet.onPaymentRefusal(ref, cb)` | `wallet.observePaymentRefusals(ref, cb)` / `stopObservingPaymentRefusals(ref)` |
 | — | new: `wallet.getToken(ref)`, `wallet.hasActivationObserver(ref)`, `wallet.getPaymentApplicationInstanceId()` |
+
+### Migrating from 3.0.0 — type and field names
+
+In 3.0.1 the type and field names match the Android and iOS SDKs. The old names are removed, not
+deprecated. Amounts are `amountMinorUnits` (a number), currencies are `currencyCode` — ISO 4217
+numeric, three digits (`'566'`) — and every outcome states `responseStatus`: it is never `null`.
+
+| 3.0.0 | 3.0.1 |
+|---|---|
+| `TapResult.status` (deprecated alias) | removed — read `TapResult.responseStatus` |
+| `TapResult.amountDisplay` (a string) | `TapResult.amountMinorUnits` (a number) |
+| `TapResult.responseStatus` could be `null` | never `null` |
+| `VeyraLookup<T>` `{ value, failureReason, message }` | gains `checked` — `true` when the check was made and answered |
+| `ScannedCustomerQr.currencyNumeric` | `ScannedCustomerQr.currencyCode` |
+| `StoredMerchant` | gains `bvn` and `cacNumber` |
+| `MerchantRegistrationResult.responseStatus`, `CustomerQrChargeOutcome.responseStatus` could be `null` | never `null` |
+| `Token.isActive` (on iOS it meant "selected") | `Token.isActive` means activated and can pay, on both platforms; new `Token.isSelected` is the token payments use |
+| `CardStatus` | `TokenStatus` |
+| `CardKeyStateEvent` | `TokenKeyStateEvent` |
+| `wallet.observeCardKeyStateChanged(listener)` / `stopObservingCardKeyStateChanged()` | `wallet.observeTokenKeyStateChanged(listener)` / `stopObservingTokenKeyStateChanged()` |
+| `CardSelection` (from `setActiveToken`) | `TokenSelection` |
+| `WalletPaymentRefusal.tokenId` | removed — use `tokenUniqueReference` |
+| `WalletTapEvent.tokenId` (`transactionStarted`, `transactionCompleted`) | `WalletTapEvent.tokenUniqueReference` |
+| `ScanInspection.currencyNumeric` (verified) | `ScanInspection.currencyCode` |
+| `PaymentQr.currencyNumeric` | `PaymentQr.currencyCode` |
+| `PaymentOutcome.responseStatus` could be `null` | never `null`; gains `creditTransactionId` and `isCreditConfirmationSupported` |
+| `TransactionSummary.transactionCurrencyCode` | `TransactionSummary.currencyCode` (three digits); gains `tokenUniqueReference` |
+| `TransactionReceipt.totalAmountMinorUnits` (a string) | `TransactionReceipt.totalAmountMinorUnits` (a number) |
+| `TransactionReceipt.currency` | `TransactionReceipt.currencyCode` |
+| `ActivationCodeResponse`, `ActivateResponse` | gain `failureCodeRaw` (the failure code exactly as sent); `ActivateResponse` also gains `recommendDeleteRaw` |
+| `responseStatus` could be `null` on `VerifyAccountResponse`, `DigitiseResult`, `ActivationCodeResponse`, `ActivateResponse`, `TokenStatusUpdateResponse` | never `null` |
+| `VeyraWalletConfig` | gains `cdcvmAllowDeviceCredential`, `cdcvmPayTitle`, `cdcvmPaySubtitle`, `cdcvmShowQrTitle`, `cdcvmShowQrSubtitle` (§6.5) |
+
+`VeyraError` codes, `VeyraEnvironment`, `Bank` and `ResponseStatus` keep their React Native names;
+the native SDKs now use the same ones.
 
 ### 9.5 Migrating from 2.x
 
@@ -2568,7 +2630,7 @@ the cause. In 3.0.0 the promise resolves, and the cause is the outcome's `respon
 | `NO_NETWORK_CONNECTION` | Resolves `NO_NETWORK_CONNECTION` — `NOT_SENT` on a payment or a digitisation, `FAILED` on any other call; on a read, `failureReason: 'NO_NETWORK_CONNECTION'` |
 | `NOT_AUTHENTICATED` | Resolves `NOT_AUTHENTICATED` — `NOT_SENT` on a payment or a digitisation, `FAILED` on any other call |
 | `AUTH_CANCELLED` / `AUTH_FAILED` / `AUTH_UNAVAILABLE` (`payScannedContext`, `showQrToPay`) | Resolves `NOT_SENT` with the same reason |
-| `ONLINE_REQUIRED` / `AMOUNT_EXCEEDS_CARD_LIMIT` / `TOKEN_NOT_ACTIVE` / `DEVICE_NOT_BOUND` | Resolves `NOT_SENT` with the same reason (the per-card `wallet.onPaymentRefusal` event is unchanged) |
+| `ONLINE_REQUIRED` / `AMOUNT_EXCEEDS_CARD_LIMIT` / `TOKEN_NOT_ACTIVE` / `DEVICE_NOT_BOUND` | Resolves `NOT_SENT` with the same reason (the per-card refusal event, now `wallet.observePaymentRefusals`, is unchanged) |
 | `NO_ACTIVE_CARD` / `CARD_CANNOT_SHOW_QR` | Resolves `NOT_SENT` with the same reason |
 | `MODE_REFUSED` | Resolves `NOT_SENT` / `MODE_REFUSED` (on a tap: a `NOT_SENT` `result` event) |
 | `MISSING_MANDATORY_CONFIG` (no merchant registered) | Resolves `MISSING_MANDATORY_CONFIG` — `NOT_SENT` on the tap, `chargeCustomerQr` and `createPaymentContext`, `FAILED` on registration and status calls |
@@ -2578,7 +2640,7 @@ the cause. In 3.0.0 the promise resolves, and the cause is the outcome's `respon
 | A rejection from `chargeCustomerQr` (transport failure) | Always resolves `CustomerQrChargeOutcome`; offline is `NOT_SENT` / `NO_NETWORK_CONNECTION` |
 | A rejection from `processReceipt` (`UNKNOWN`) | Resolves a `ReceiptScan`: `APPROVED` with `receipt`, or `FAILED` / `INVALID_RECEIPT` · `RECEIPT_NOT_FROM_THIS_WALLET` · `RECEIPT_MISMATCH` · `PAYMENT_NOT_CONFIRMED` · `RECEIPT_FOR_ANOTHER_TRANSACTION` |
 | A rejection from `reconcilePendingTransactions` (`UNKNOWN`) | Resolves a `ReconcileResult`; `failureReason` set only when the reconcile could not run |
-| A rejection from iOS `setActiveCard` (`UNKNOWN`, card not in the wallet) | Resolves a `CardSelection`: `FAILED` / `CARD_NOT_FOUND` (Android also `CARD_DATA_MISSING`) |
+| A rejection from iOS `setActiveCard` (`UNKNOWN`, card not in the wallet) | Resolves a `TokenSelection`: `FAILED` / `CARD_NOT_FOUND` (Android also `CARD_DATA_MISSING`) |
 
 **What still rejects:** the five setup codes — `NOT_CONFIGURED`, `NOT_SIGNED_IN`,
 `INVALID_CONFIGURATION` (new: it replaces `VALIDATION` on `Veyra.initialize`), `SESSION_REQUIRED`,
@@ -2596,7 +2658,7 @@ the cause. In 3.0.0 the promise resolves, and the cause is the outcome's `respon
 | `wallet.deactivateToken` | `{ tokenUniqueReference, status, message }` | `TokenStatusUpdateResponse` — gains the triple; only `'APPROVED'` removed the card |
 | `wallet.showQrToPay` | `PaymentQr` (rejected when no QR could be made) | `PaymentQr` with the triple; `payload`, `tokenUniqueReference`, `transactionHash` nullable (set on `'APPROVED'`) |
 | `wallet.refreshTransactionStatus` / `refreshCreditConfirmation` | `TransactionSummary \| null` | `VeyraLookup<TransactionSummary>` |
-| `wallet.setActiveCard` | `void` (iOS rejected `UNKNOWN` for a card not in the wallet) | `CardSelection` — `APPROVED`, or `FAILED` / `CARD_NOT_FOUND` · `CARD_DATA_MISSING` (Android) |
+| `wallet.setActiveCard` | `void` (iOS rejected `UNKNOWN` for a card not in the wallet) | `TokenSelection` (`setActiveToken`) — `APPROVED`, or `FAILED` / `CARD_NOT_FOUND` · `CARD_DATA_MISSING` (Android) |
 | `wallet.processReceipt` | `TransactionReceipt` (rejected `UNKNOWN` when refused) | `ReceiptScan` — `receipt` (set on `'APPROVED'`) + status and reason |
 | `wallet.reconcilePendingTransactions` | `void` (rejected `UNKNOWN` when it could not run) | `ReconcileResult` — `checked`, `failureReason`, `message` |
 | `softpos.register` | `MerchantRegistrationResult` | gains `responseStatus` / `responseStatusReason` |
@@ -2606,14 +2668,14 @@ the cause. In 3.0.0 the promise resolves, and the cause is the outcome's `respon
 | `softpos.inspectCustomerQr` | `ScannedCustomerQr` | `CustomerQrInspection` — `qr` (set on `'APPROVED'`) + triple |
 | `softpos.chargeCustomerQr` | `CustomerQrChargeOutcome` (`approved` from the code, no status) | gains `responseStatus` / `responseStatusReason` / `originalPayment`; `approved` is `responseStatus === 'APPROVED'` |
 | `softpos.refreshTransactionStatus` / `refreshCreditConfirmation` | `MerchantTransaction \| null` | `VeyraLookup<MerchantTransaction>` |
-| `softpos.tap.start`'s `onEvent` `result` | `TapResult` with `status`; `reason` / `sdkErrorCode` untyped extras | `responseStatus` (`status` is a deprecated alias), `responseStatusReason`, `originalPayment`; `reason` / `sdkErrorCode` gone |
+| `softpos.tap.start`'s `onEvent` `result` | `TapResult` with `status`; `reason` / `sdkErrorCode` untyped extras | `responseStatus`, `responseStatusReason`, `originalPayment`; `reason` / `sdkErrorCode` gone (the `status` alias is removed in 3.0.1) |
 | `wallet.onTapEvent` on iOS | a listener that never fired | throws `UNSUPPORTED_ON_PLATFORM` |
 
 `ResponseStatus` gains `'NOT_SENT'` and `'RETRY'`: add both branches wherever you switch on a
 status — a `default` that treats an unknown status as pending would otherwise show a payment that
 was never sent, or never sent to the bank, as "processing". `'RETRY'` is also a value of
 `MerchantTransaction.status`, `TransactionSummary.authorizationStatus` and the `status` of both
-transaction-resolved events (`wallet.onTransactionResolved`, `softpos.observeTransactionResolved`).
+transaction-resolved events (`wallet.observeTransactionResolved`, `softpos.observeTransactionResolved`).
 
 **The merchant order ID and `RETRY`:**
 
@@ -2663,7 +2725,7 @@ type CancelResult =                     // the answer to a cancel — never a ca
   | 'CANCELLED' | 'TOO_LATE_TO_CANCEL_REQUEST_ALREADY_SENT' | 'TOO_LATE_TO_CANCEL_TASK_ALREADY_PROCESSED'
   | 'NO_PAYMENT_IN_PROGRESS_FOR_ORDER_ID' | 'NO_DIGITISATION_IN_PROGRESS_FOR_CLIENT_REQUEST_ID';
 
-interface VeyraLookup<T> { value: T | null; failureReason: string | null; message: string | null }
+interface VeyraLookup<T> { value: T | null; failureReason: string | null; message: string | null; checked: boolean }
 
 interface OriginalPayment {          // on a DUPLICATE_MERCHANT_ORDER_ID refusal only
   responseCode: string | null; responseStatus: string | null; responseStatusReason: string | null;
@@ -2672,12 +2734,13 @@ interface OriginalPayment {          // on a DUPLICATE_MERCHANT_ORDER_ID refusal
 
 // Wallet
 interface BankList { banks: Bank[]; responseStatus: ResponseStatus; responseStatusReason: string | null; message: string | null }
-interface TokenStatusResult { tokenStatus: CardStatus | string | null; responseStatus: ResponseStatus; responseStatusReason: string | null; message: string | null }
+type TokenStatus = 'ACTIVE' | 'SUSPENDED' | 'EXPIRED' | 'PENDING_ACTIVATION' | 'DEACTIVATED';
+interface TokenStatusResult { tokenStatus: TokenStatus | string | null; responseStatus: ResponseStatus; responseStatusReason: string | null; message: string | null }
 interface TokenStatusUpdateResponse {   // deactivateToken — only APPROVED removed the card
   tokenUniqueReference: string | null; status: string | null; message: string | null;
-  responseStatus: ResponseStatus | null; responseStatusReason: string | null;
+  responseStatus: ResponseStatus; responseStatusReason: string | null;
 }
-interface CardSelection {               // setActiveToken — APPROVED, or FAILED / CARD_NOT_FOUND · CARD_DATA_MISSING (Android)
+interface TokenSelection {               // setActiveToken — APPROVED, or FAILED / CARD_NOT_FOUND · CARD_DATA_MISSING (Android)
   responseStatus: ResponseStatus; responseStatusReason: string | null; message: string | null;
 }
 interface ReceiptScan {                 // processReceipt — APPROVED (receipt set) or FAILED with the reason
@@ -2689,18 +2752,26 @@ interface ReconcileResult {             // reconcilePendingTransactions — a re
 }
 interface PaymentQr {                   // showQrToPay — APPROVED (payload set) or NOT_SENT
   tokenUniqueReference: string | null; payload: string | null; amountMinorUnits: number;
-  currencyNumeric: string | null; expiresAtEpochMillis: number; transactionHash: string | null;
+  currencyCode: string | null; expiresAtEpochMillis: number; transactionHash: string | null;
   responseStatus: ResponseStatus; responseStatusReason: string | null; message: string | null;
 }
-// PaymentOutcome, DigitiseResult, VerifyAccountResponse, ActivationCodeResponse, ActivateResponse:
-// each carries responseStatus + responseStatusReason (+ responseCode where it has one).
+interface PaymentOutcome {              // payScannedContext — branch on responseStatus, not approved
+  approved: boolean; responseCode: string | null;
+  responseStatus: ResponseStatus; responseStatusReason: string | null; message: string | null;
+  merchantName: string | null; merchantLocation: string | null;
+  creditTransactionId: string | null; isCreditConfirmationSupported: boolean | null;
+}
+// DigitiseResult, VerifyAccountResponse, ActivationCodeResponse, ActivateResponse: each carries
+// responseStatus (never null) + responseStatusReason (+ responseCode where it has one).
+// ActivationCodeResponse / ActivateResponse also carry failureCodeRaw (the failure code exactly as
+// sent), and ActivateResponse recommendDeleteRaw.
 
 // Merchant
 interface SettlementBankList { banks: Bank[]; responseStatus: ResponseStatus; responseStatusReason: string | null; message: string | null }
 interface MerchantRegistrationResult {
   success: boolean; merchantId: string | null; terminalId: string | null;
   merchantStatus: MerchantStatus | string | null; message: string | null;
-  responseStatus: ResponseStatus | null; responseStatusReason: string | null;
+  responseStatus: ResponseStatus; responseStatusReason: string | null;
 }
 interface MerchantStatusResult {        // refreshStatus / activate / deactivate / update
   merchantId: string | null; merchantStatus: MerchantStatus | string | null;
@@ -2716,9 +2787,9 @@ interface CustomerQrInspection {        // inspectCustomerQr — APPROVED (qr se
 }
 interface CustomerQrChargeOutcome {
   approved: boolean;                    // responseStatus === 'APPROVED'
-  responseStatus: ResponseStatus | null; responseStatusReason: string | null;
+  responseStatus: ResponseStatus; responseStatusReason: string | null;
   responseCode: string | null;          // receipts and support only; null on NOT_SENT
-  message: string | null;               // Android only
+  message: string | null;
   transactionId: string | null; merchantTransactionReference: string | null; merchantOrderId: string | null;
   creditTransactionId: string | null; isCreditConfirmationSupported: boolean | null;
   originalPayment: OriginalPayment | null;
@@ -2737,9 +2808,8 @@ interface OrderPaymentAttempt {
   responseCode: string | null; responseStatus: ResponseStatus | null; responseStatusReason: string | null;
 }
 interface TapResult {           // the tap `result` event
-  responseCode: string | null; responseStatus: ResponseStatus | null; responseStatusReason: string | null;
-  /** @deprecated */ status: ResponseStatus | null;
-  message: string | null; amountDisplay: string | null; cardScheme: string | null;
+  responseCode: string | null; responseStatus: ResponseStatus; responseStatusReason: string | null;
+  message: string | null; amountMinorUnits: number | null; cardScheme: string | null;
   maskedTokenLast4: string | null; merchantTransactionReference: string | null; transactionId: string | null;
   merchantStatus: MerchantStatus | string | null; creditTransactionId: string | null;
   isCreditConfirmationSupported: boolean | null; originalPayment: OriginalPayment | null;
@@ -2828,13 +2898,13 @@ See `src/cancel.ts` (the answer → action rule, unit-tested) and the three scre
 | …with the app process not initialised (killed / phone restarted) | answered "application not found" until the app initialises with the customer | — |
 | Tap acceptance | ✅ | ✅ (NFC-capable iPhones) |
 | Tap `result` triple (`responseStatus` / `responseStatusReason` / `responseCode` / `originalPayment`) | ✅ | ✅ |
-| Tap `result` `amountDisplay` / `cardScheme` / `transactionId` / `merchantStatus` | ✅ | `null` — read the settled row |
+| Tap `result` `amountMinorUnits` / `cardScheme` / `transactionId` / `merchantStatus` | ✅ | ✅ |
 | Scan-to-pay / Show-QR / history / receipts | ✅ | ✅ |
 | Merchant registration + QR rails | ✅ | ✅ |
 | Receipt QR | PNG (`qrCodeBase64`) | payload (`qrPayload`) |
 | `appleTeamId` | — | required |
 | `wallet.setActiveToken` answering `FAILED` / `CARD_DATA_MISSING` (card listed, payment data missing) | ✅ | — (only `CARD_NOT_FOUND`) |
-| `CustomerQrChargeOutcome.message` | ✅ | always `null` |
+| `CustomerQrChargeOutcome.message` | ✅ | ✅ |
 | `merchantOrderId` (required) on `chargeCustomerQr` | ✅ | ✅ |
 | `merchantOrderId` (required) on `tap.start` | ✅ | ✅ |
 | `merchantOrderId` (required) on `createPaymentContext` | ✅ | ✅ |

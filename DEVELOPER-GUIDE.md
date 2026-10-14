@@ -612,8 +612,9 @@ code — including none at all — means this SDK version cannot interpret the a
 **discarded** (nothing provisioned, no card added, even if the response carried full token data)
 and the call resolves `FAILED` with reason `UNRECOGNISED_RESPONSE_CODE` (§9.2, Table A). Start a
 new add-card, and update the SDK if it persists.
-iOS-only param: `bankName` (shown on the stored card). Android additionally requires
-`consumerIdentifier`, `bvn`, `accountHolderAddress`, `mobileNumber`.
+`bankName` is kept on the stored card and not sent. `bvn`: Optional when your payment app provider is registered as the account issuer; otherwise the backend refuses with `BVN_REQUIRED`. A blank
+`bvn` is sent as absent. Without one, a provider that is not the issuer gets `'FAILED'` /
+`BVN_REQUIRED` (code `'DECLINED'`) and nothing is created: collect the BVN and add the card again.
 
 **After a lost answer: `wallet.deactivateDigitise(clientRequestId)`.** A `digitise` that was sent but
 got no usable answer resolves `'FAILED'` with `NO_RESPONSE_RECEIVED` or `UPSTREAM_ERROR`. The Veyra
@@ -1153,10 +1154,12 @@ registration and profile, 7.2 tap to accept, 7.3 QR (MPM and CPM), 7.4 transacti
 | `getStoredMerchantData(customerId)` | That customer's stored merchant, **before `Veyra.initialize`** — nothing signed in, started or claimed. | `Promise<StoredMerchant \| null>` |
 | `isMerchantRegistered(customerId)` | `isRegistered()` for that customer, **before `Veyra.initialize`**. Gate your Home screen's "Get paid" on it. | `Promise<boolean>` |
 
-`register` takes `{ merchantType: 'PERSONAL' | 'BUSINESS', … }` (BVN optional for both types —
-send it when you have it; CAC number for business; optional `walletAccountId`, stored verbatim by
+`register` takes `{ merchantType: 'PERSONAL' | 'BUSINESS', … }` (BVN for either type: optional
+when your payment app provider is registered as the account issuer, otherwise the gateway refuses
+with `BVN_REQUIRED`; CAC number for business; optional `walletAccountId`, stored verbatim by
 the gateway); `updateMerchant(…)` also accepts optional `walletAccountId` and
-`bvn`. The merchant belongs to the signed-in customer (§4.1); a successful `register`
+`bvn` (left out, the stored BVN is kept; a provider that is not the account issuer is refused
+`BVN_REQUIRED` if the update would leave the merchant with no BVN). The merchant belongs to the signed-in customer (§4.1); a successful `register`
 overwrites the stored merchant — there is no `clearStored()`. Gate acceptance on the stored merchant's status
 being `ACTIVE` — `isMerchantActive()` gives the SDK's own reading (`false` with no merchant stored; a
 merchant stored before statuses were kept reads active). There is no `acquirerId` field anywhere: the gateway resolves it from
@@ -2343,6 +2346,7 @@ Wallet API only. No `responseCode` except on add-card.
 | Card status (`wallet.tokenStatus`) | `FAILED` | — | `TOKEN_NOT_FOUND` | the card isn't known to the token service |
 | Card remove (`wallet.deactivateToken`) | `FAILED` | — | `TOKEN_NOT_FOUND`, `TOKEN_STATE_CONFLICT` | the card isn't known, or the change isn't allowed from its current state — the card was **not** removed |
 | Card remove (`wallet.deactivateToken`) | `PENDING` | — | `NO_RESPONSE_RECEIVED` / `UPSTREAM_ERROR` | sent, no usable answer — read `tokenStatus` before trying again |
+| Add card | `FAILED` | `DECLINED` | `BVN_REQUIRED` | No BVN was sent and your payment app provider is not registered as the account issuer; nothing was created. Collect the customer's BVN and add the card again |
 | Add card | `FAILED` | — | `DUPLICATE_CLIENT_REQUEST_ID` | This `clientRequestId` was already used for an add card; nothing was created. Send a new one (or leave it unset so the SDK generates one) |
 | Switch off a lost add card (`wallet.deactivateDigitise`) | `APPROVED` | — | — | The card the add card created was switched off (or already was); `tokenUniqueReference` names it. Let the customer add the card again |
 | Switch off a lost add card | `FAILED` | — | `NO_TOKEN_CREATED` | The add card ended before a card was created — nothing to switch off |
@@ -2373,8 +2377,8 @@ when sent with no usable answer (§7.1, §7.3).
 
 | Call | Reasons | What your app does |
 |---|---|---|
-| Merchant registration (`softpos.register`) | `MERCHANT_TYPE_REQUIRED`, `MERCHANT_NAME_REQUIRED`, `EMAIL_ADDRESS_REQUIRED`, `PHONE_NUMBER_REQUIRED`, `ACCOUNT_NUMBER_REQUIRED`, `ADDRESS_LINE_1_REQUIRED`, `CITY_REQUIRED`, `BANK_INSTITUTION_CODE_REQUIRED`, `PAYMENT_APP_PROVIDER_ID_REQUIRED`, `CAC_NUMBER_REQUIRED` | ask for the missing field |
-| Merchant update / status / activate / deactivate (`softpos.update`, `refreshStatus`, `activate`, `deactivate`) | `MERCHANT_ID_REQUIRED`, `MERCHANT_NOT_FOUND`, `INVALID_REQUEST` (the change is not allowed from the current state) | fix the request / check the merchant's state |
+| Merchant registration (`softpos.register`) | `MERCHANT_TYPE_REQUIRED`, `MERCHANT_NAME_REQUIRED`, `EMAIL_ADDRESS_REQUIRED`, `PHONE_NUMBER_REQUIRED`, `ACCOUNT_NUMBER_REQUIRED`, `ADDRESS_LINE_1_REQUIRED`, `CITY_REQUIRED`, `BANK_INSTITUTION_CODE_REQUIRED`, `PAYMENT_APP_PROVIDER_ID_REQUIRED`, `CAC_NUMBER_REQUIRED`, `BVN_REQUIRED` (no BVN, and your payment app provider is not registered as the account issuer) | ask for the missing field |
+| Merchant update / status / activate / deactivate (`softpos.update`, `refreshStatus`, `activate`, `deactivate`) | `MERCHANT_ID_REQUIRED`, `MERCHANT_NOT_FOUND`, `INVALID_REQUEST` (the change is not allowed from the current state), `BVN_REQUIRED` (update only: the merchant would be left with no BVN, and your payment app provider is not registered as the account issuer) | fix the request / check the merchant's state |
 | QR payment code creation (`softpos.createPaymentContext`) | `AMOUNT_REQUIRED`, `MERCHANT_NOT_FOUND`, `INVALID_REQUEST`, `DUPLICATE_MERCHANT_ORDER_ID` (includes the original payment) | fix the request; for a duplicate the order is paid or still being confirmed — take no further payment for it (§7.3) |
 
 #### Generic fallbacks (any Veyra service, any call)
@@ -2410,6 +2414,13 @@ so run the activation flow with the returned `activationMethods`):
 A mismatch usually means the details your app sent do not match the bank's record. The account
 holder name, address and BVN you pass are compared with the bank's records, so check what you
 collected before telling the customer their bank has a problem.
+
+**The token service refused the request before asking the issuer** (`FAILED`, code `DECLINED` —
+nothing was created):
+
+| Cause | The `message` you receive |
+|---|---|
+| `BVN_REQUIRED` | "BVN is required for this payment app provider" — no `bvn` was sent and your payment app provider is not registered as the account issuer. Collect the customer's BVN and add the card again |
 
 **The account cannot be tokenised** (`DECLINED` — the flow ends):
 

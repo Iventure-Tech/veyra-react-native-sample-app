@@ -15,3 +15,8 @@ jest.mock('react-native-camera-kit', () => ({
   Camera: () => null,
   CameraType: { Back: 'back', Front: 'front' },
 }));
+
+// AsyncStorage is native too; its package ships an in-memory stand-in for tests.
+jest.mock('@react-native-async-storage/async-storage', () =>
+  require('@react-native-async-storage/async-storage/jest/async-storage-mock')
+);

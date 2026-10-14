@@ -9,6 +9,7 @@ import {
   type WalletTapEvent,
 } from 'veyra-sdk-react-native';
 import type { RootStackParamList } from '../../App';
+import { forgetCardRequestId, getCardRequestId } from '../cardRequestIds';
 import { DEVICE_NOT_BOUND_MESSAGE, DEVICE_NOT_BOUND_TITLE } from '../paymentResult';
 import { theme } from '../theme';
 import { Busy, Button, formatAmount, Section } from '../ui';
@@ -208,7 +209,12 @@ export function PayScreen({
         style: 'destructive',
         onPress: async () => {
           try {
-            const removal = await wallet.deactivateToken(card.tokenUniqueReference);
+            // Remove names the add-card attempt that created the card; on APPROVED the SDK removes
+            // the card from this phone. A card with no recorded id is removed by its token reference.
+            const clientRequestId = await getCardRequestId(card.tokenUniqueReference).catch(() => null);
+            const removal = clientRequestId
+              ? await wallet.deactivateDigitise(clientRequestId)
+              : await wallet.deactivateToken(card.tokenUniqueReference);
             // Only APPROVED removed the card; anything else leaves it in the wallet, so say why.
             if (removal.responseStatus !== 'APPROVED') {
               Alert.alert(
@@ -219,6 +225,7 @@ export function PayScreen({
               );
               return;
             }
+            await forgetCardRequestId(card.tokenUniqueReference).catch(() => {});
             reload();
           } catch (e) {
             // Only a setup mistake rejects.

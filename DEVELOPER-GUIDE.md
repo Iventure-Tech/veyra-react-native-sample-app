@@ -502,6 +502,33 @@ fields and could alter plain answers such as a transaction status — which is w
 bank or payment app provider itself, the party already trusted with those fields, may operate a
 proxy provider, and why it must forward bytes unmodified.
 
+### 4.3 Request timeout
+
+`softpos` and `wallet` each take an optional `requestTimeoutSeconds`: the longest that SDK waits
+for one call to the Veyra backend, start to finish (connecting, sending and waiting for the
+answer). Each SDK uses its own value.
+
+```ts
+await Veyra.initialize(customerId, {
+  softpos: { environment: 'TEST', paymentAppProviderId, requestTimeoutSeconds: 20 },
+  wallet: { environment: 'TEST', paymentAppProviderId, tokenRequestorId, requestTimeoutSeconds: 30 },
+}, provider);
+```
+
+- **Allowed values: whole seconds from 5 to 60.** Anything else makes `initialize` reject with
+  `INVALID_CONFIGURATION`, naming the value and the range. The SDK never adjusts the value.
+- **Not set:** the SDK keeps its own timeouts. On iOS that is 60 s per call; on Android it
+  differs by call (up to about 40 s for most SoftPOS lookups and up to about 90 s for payments
+  and wallet calls).
+- **It applies to every backend call the SDK makes,** including the token request and calls
+  through your proxy provider (your backend's relay is given the same time limit). It does not
+  change the NFC timeouts or the card-activation wait.
+- **A payment that runs out of time is pending, not failed.** The request may already have
+  reached the server, so the payment ends `PENDING` (`68` / `NO_RESPONSE_RECEIVED`) and the SDK
+  checks the result later. A shorter timeout gives the user an answer sooner, but more payments
+  will be pending rather than final. A longer one gets more final answers on a slow network,
+  but the user waits longer.
+
 ## 5. Sessions — how payment screens work in React Native
 
 **This is the one genuinely React-Native-specific concept.** The SDK arms the device
@@ -1823,7 +1850,7 @@ integration. Do not build user-facing screens for them, and do not offer the use
 |---|---|---|
 | `NOT_CONFIGURED` | any call before `Veyra.initialize`, including — on Android — a call made before an Activity is attached ("no Activity attached") | initialise the SDK first, at app start, and call the SDK only once the app is on screen (§4) |
 | `NOT_SIGNED_IN` | no customer: a call made after `Veyra.signOut()` | call `Veyra.initialize` with the customer's `customerId` before using the SDK (§4.1) |
-| `INVALID_CONFIGURATION` | `Veyra.initialize` was given a configuration it can't use: an unusable provider; a provider of a different kind from an earlier `initialize` in this app process; a blank `customerId`; missing required config (environment, payment app provider ID, token requestor ID, recommendation standard version, and `appleTeamId` on iOS) | pass a valid configuration; the message names the exact problem (§4.2) |
+| `INVALID_CONFIGURATION` | `Veyra.initialize` was given a configuration it can't use: an unusable provider; a provider of a different kind from an earlier `initialize` in this app process; a blank `customerId`; missing required config (environment, payment app provider ID, token requestor ID, recommendation standard version, and `appleTeamId` on iOS); a `requestTimeoutSeconds` outside 5–60 or not a whole number | pass a valid configuration; the message names the exact problem (§4.2) |
 | `SESSION_REQUIRED` | a payment call without its screen session — `softpos.tap.*` without `useGetPaidSession`, `wallet.setActiveToken` without `usePaySession`. The same calls are gated on Android and iOS | mount the session hook on the payment screen (§5) |
 | `UNSUPPORTED_ON_PLATFORM` | a method this platform can't perform — `wallet.observeTapEvents` on iOS throws it synchronously instead of returning a listener that could never fire | don't call it on this platform (§10) |
 | `UNKNOWN` | anything the bridge could not classify — an SDK defect, not an outcome; see `message` | log it and report it |

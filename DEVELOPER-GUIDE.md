@@ -351,9 +351,7 @@ in with `username`/`password`). `bankClientId`/`bankClientSecret` are **your ban
 client at its authorization server, not the Veyra client: the sample uses them only to log the user
 in and for the token exchange, and never passes them to the SDK.
 The sample ships returning the proxy provider (`bankBackendRelay`), so the app holds no Veyra
-secret. The deprecated `clientSecretCredentials` — a `VeyraClientSecretProvider` **for testing
-only** that needs just `clientId` and `clientSecret` — is still there for testing before your
-backend has either endpoint.
+secret.
 
 > **Signing the user in to your bank is your app's responsibility, not the SDK's.** The SDK never
 > authenticates with your bank or its backend. It doesn't collect credentials, it doesn't obtain,
@@ -2256,10 +2254,9 @@ digitisation (tap, `chargeCustomerQr`, `createPaymentContext`, `payScannedContex
   already; the SDK refreshes the card itself, typically within seconds. A card state, not a
   network state.
 
-**`NOT_AUTHENTICATED` with a client secret.** When the token endpoint refuses the client, a wrong
-`clientId` / `clientSecret` in `veyra.config.ts` is by far the most likely cause. With a
-`VeyraAssertionProvider` it usually means nobody is signed in to your app — send the user to
-sign-in, then retry. The SDK never falls back to another connection mode (§4.2).
+**`NOT_AUTHENTICATED`.** With a `VeyraAssertionProvider` it usually means nobody is signed in to
+your app — send the user to sign-in, then retry. The SDK never falls back to another connection
+mode (§4.2).
 
 **Card-read failures — "card not supported, tap again".** When a tapped card cannot be read, the
 reader normally stays armed and you get the `unsupportedCard` / `cardContactLost` tap events — no

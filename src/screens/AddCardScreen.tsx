@@ -11,6 +11,7 @@ import {
 import type { RootStackParamList } from '../../App';
 import { SAMPLE_ACCOUNT } from '../../veyra.config';
 import { CANNOT_CANCEL_MESSAGE, cancelAction, cancelRefusedTooLate, isCancelledOutcome, newClientRequestId } from '../cancel';
+import { shouldDeactivateLostDigitise } from '../lostDigitise';
 import { useSession } from '../session';
 import { theme } from '../theme';
 import { Busy, Button, Field, FormScrollView, Section } from '../ui';
@@ -152,10 +153,15 @@ export function AddCardScreen({
       }
       if (!result.isApproved && !result.requiresActivation) {
         // Digitise is never PENDING: DECLINED, FAILED, or NOT_SENT (never reached Veyra — retry as is).
-        Alert.alert(
-          result.responseStatus === 'NOT_SENT' ? 'Card not added' : 'Declined',
-          `${result.message ?? 'Not approved'} (${result.responseStatusReason ?? result.responseStatus ?? '-'})`
-        );
+        let detail = `${result.message ?? 'Not approved'} (${result.responseStatusReason ?? result.responseStatus ?? '-'})`;
+        // Sent, but no usable answer: the server may have created a card this phone never
+        // received. Switch it off by this attempt's id; the next "Add" is a new attempt.
+        if (shouldDeactivateLostDigitise(result) && result.clientRequestId) {
+          const cleanup = await wallet.deactivateDigitise(result.clientRequestId);
+          const answer = [cleanup.responseStatus, cleanup.responseStatusReason].filter(Boolean).join(' / ');
+          detail += `\nAny card this attempt created was switched off: ${answer}`;
+        }
+        Alert.alert(result.responseStatus === 'NOT_SENT' ? 'Card not added' : 'Declined', detail);
         setStep('form');
         return;
       }

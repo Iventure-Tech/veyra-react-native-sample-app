@@ -577,6 +577,7 @@ and receipts, and the observers. Each subsection opens with a table of its calls
 | `wallet.verifyAccount(params)` | Eligibility pre-check for the account. A read, never `'PENDING'`; a refusal before sending (missing field, offline…) is `'FAILED'` with the reason | `VerifyAccountResponse` |
 | `wallet.digitise(params)` | Adds the account as a token. `recommendation` is **your app's** risk decision — required, never defaulted. A missing field is `'NOT_SENT'` / `INVALID_REQUEST`. Pass your own `clientRequestId` (e.g. a fresh UUID per attempt) to be able to cancel it | `DigitiseResult` |
 | `wallet.cancelDigitise(clientRequestId)` | Cancels the `digitise` started with that `clientRequestId`, only while it is still on the device (§9.8). A digitise started without one cannot be cancelled | `CancelResult` |
+| `wallet.deactivateDigitise(clientRequestId)` | Switches off, on the server, the card a `digitise` created when its answer never reached the phone — see below. Only the phone that sent the `digitise` can do it | `TokenStatusUpdateResponse` |
 
 `digitise` resolves with `responseCode` `'APPROVED'` (ready), `'APPROVE_REQUIRE_AUTH'`
 (activation needed — `activationMethods` lists the OTP channels), or `'DECLINED'`. Any other
@@ -586,6 +587,35 @@ and the call resolves `FAILED` with reason `UNRECOGNISED_RESPONSE_CODE` (§9.2, 
 new add-card, and update the SDK if it persists.
 iOS-only param: `bankName` (shown on the stored card). Android additionally requires
 `consumerIdentifier`, `bvn`, `accountHolderAddress`, `mobileNumber`.
+
+**After a lost answer: `wallet.deactivateDigitise(clientRequestId)`.** A `digitise` that was sent but
+got no usable answer resolves `'FAILED'` with `NO_RESPONSE_RECEIVED` or `UPSTREAM_ERROR`. The Veyra
+token service may still have created the card, and its details never reached the phone, so it can never
+pay. `DigitiseResult.clientRequestId` holds the id the attempt was sent with (yours, or one the SDK
+generated): switch the card off with it, then let the customer add the card again with a new id.
+
+```ts
+const result = await wallet.digitise(params);
+if (result.responseStatus === 'FAILED' &&
+    (result.responseStatusReason === 'NO_RESPONSE_RECEIVED' || result.responseStatusReason === 'UPSTREAM_ERROR') &&
+    result.clientRequestId) {
+  const cleanup = await wallet.deactivateDigitise(result.clientRequestId);
+  // 'APPROVED': switched off. 'FAILED' / NO_TOKEN_CREATED or DIGITISATION_NOT_FOUND: nothing to
+  // switch off. 'PENDING': no answer — call again.
+}
+```
+
+| `responseStatus` / `responseStatusReason` | Meaning | What to do |
+|---|---|---|
+| `'APPROVED'` | The card was switched off (or already was). `tokenUniqueReference` names it; if it is on this phone it is removed with its data. | Let the customer add the card again. |
+| `'FAILED'` / `NO_TOKEN_CREATED` | The add-card ended before a card was created. | Nothing to switch off. |
+| `'FAILED'` / `DIGITISATION_NOT_FOUND` | No finished add-card with that ID from this phone. One still running on the server is not found until it ends. | If the add-card had only just failed, call again after a minute. |
+| `'FAILED'` / `TOKEN_STATE_CONFLICT` | The card's status does not allow switching it off. | Contact support. |
+| `'PENDING'` | Sent, no usable answer. | Call again — a repeat is harmless. |
+| `'FAILED'` / `INVALID_REQUEST` | The ID was blank; nothing was sent. | Pass the ID from `DigitiseResult`. |
+
+Every `clientRequestId` is used once: a `digitise` that reuses one this app has already sent resolves
+`'FAILED'` / `DUPLICATE_CLIENT_REQUEST_ID`. Leave it unset and the SDK generates a new one each time.
 
 ### 6.2 Activation
 
@@ -2254,12 +2284,18 @@ Wallet API only. No `responseCode` except on add-card.
 | Add card | `APPROVED` | `APPROVE_REQUIRE_AUTH` | — (or the identity mismatch, below) | added, but the customer must activate it — run activation with the returned `activationMethods` (§6.2) |
 | Add card | `DECLINED` | `DECLINED` | the issuer's reason (below) | the issuer refused this account; show the reason |
 | Add card | `FAILED` | — | `INTERNAL_ERROR` | the Veyra token service could not complete it; start a new add-card |
-| Add card | `FAILED` | — | `NO_RESPONSE_RECEIVED` / `UPSTREAM_ERROR` | no answer (Table A); start a new add-card |
+| Add card | `FAILED` | — | `NO_RESPONSE_RECEIVED` / `UPSTREAM_ERROR` | no answer (Table A). The card may have been created without reaching the phone: switch it off with `wallet.deactivateDigitise(result.clientRequestId)`, then start a new add-card |
 | Activation code request (`wallet.requestActivationCode`) | `FAILED` | — | `TOKEN_NOT_FOUND`, `ACTIVATION_LOCKED`, `CODE_REQUEST_RATE_LIMITED`, `ACTIVATION_FAILED` | can't send a code now; locked / rate-limited → wait or contact the issuer |
 | Activation code verify (`wallet.activate`) | `FAILED` | — | `CODE_INVALID`, `CODE_EXPIRED`, `MAX_ATTEMPTS_EXCEEDED`, `NO_PENDING_ACTIVATION`, `TOKEN_NOT_ACTIVATABLE`, `ACTIVATION_LOCKED`, `TOKEN_NOT_FOUND`, `ACTIVATION_FAILED` | wrong / expired code → ask again (`attemptsRemaining` says how many are left); max attempts or locked → remove the card and add it again (`recommendDelete`) |
 | Card status (`wallet.tokenStatus`) | `FAILED` | — | `TOKEN_NOT_FOUND` | the card isn't known to the token service |
 | Card remove (`wallet.deactivateToken`) | `FAILED` | — | `TOKEN_NOT_FOUND`, `TOKEN_STATE_CONFLICT` | the card isn't known, or the change isn't allowed from its current state — the card was **not** removed |
 | Card remove (`wallet.deactivateToken`) | `PENDING` | — | `NO_RESPONSE_RECEIVED` / `UPSTREAM_ERROR` | sent, no usable answer — read `tokenStatus` before trying again |
+| Add card | `FAILED` | — | `DUPLICATE_CLIENT_REQUEST_ID` | This `clientRequestId` was already used for an add card; nothing was created. Send a new one (or leave it unset so the SDK generates one) |
+| Switch off a lost add card (`wallet.deactivateDigitise`) | `APPROVED` | — | — | The card the add card created was switched off (or already was); `tokenUniqueReference` names it. Let the customer add the card again |
+| Switch off a lost add card | `FAILED` | — | `NO_TOKEN_CREATED` | The add card ended before a card was created — nothing to switch off |
+| Switch off a lost add card | `FAILED` | — | `DIGITISATION_NOT_FOUND` | No finished add card with that id from this phone; one still running is not found until it ends — call again after a minute |
+| Switch off a lost add card | `FAILED` | — | `TOKEN_STATE_CONFLICT` | The card's status does not allow it to be switched off |
+| Switch off a lost add card | `PENDING` | — | `NO_RESPONSE_RECEIVED` / `UPSTREAM_ERROR` | Sent, no usable answer — call again; a repeat is harmless |
 | Bank lookup (`wallet.getBanks(accountNumber)`, `wallet.verifyAccount`) | `FAILED` | — | `INVALID_ACCOUNT_NUMBER` | check the account number |
 
 The two activation calls carry `responseStatus` / `responseStatusReason` like every other call,

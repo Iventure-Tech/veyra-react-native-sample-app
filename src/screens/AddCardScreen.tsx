@@ -11,6 +11,7 @@ import {
 import type { RootStackParamList } from '../../App';
 import { SAMPLE_ACCOUNT } from '../../veyra.config';
 import { CANNOT_CANCEL_MESSAGE, cancelAction, cancelRefusedTooLate, isCancelledOutcome, newClientRequestId } from '../cancel';
+import { recordCardRequestId } from '../cardRequestIds';
 import { shouldDeactivateLostDigitise } from '../lostDigitise';
 import { useSession } from '../session';
 import { theme } from '../theme';
@@ -165,6 +166,9 @@ export function AddCardScreen({
         setStep('form');
         return;
       }
+      // "Remove card" later names this add-card attempt by its id. Losing it only means the card is
+      // removed by its token reference instead, so a storage failure doesn't fail the add.
+      await recordCardRequestId(result).catch(() => {});
       setTokenRef(result.tokenUniqueReference);
       if (result.requiresActivation) {
         setMethods(result.activationMethods);

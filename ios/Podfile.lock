@@ -2241,6 +2241,35 @@ PODS:
     - ReactCommon/turbomodule/core
     - SocketRocket
     - Yoga
+  - RNCAsyncStorage (2.2.0):
+    - boost
+    - DoubleConversion
+    - fast_float
+    - fmt
+    - glog
+    - hermes-engine
+    - RCT-Folly
+    - RCT-Folly/Fabric
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-hermes
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - SocketRocket
+    - Yoga
   - RNScreens (4.13.1):
     - boost
     - DoubleConversion
@@ -2362,7 +2391,7 @@ PODS:
     - SocketRocket
     - Yoga
   - SocketRocket (0.7.1)
-  - veyra-sdk-react-native (1.0.12-SNAPSHOT):
+  - veyra-sdk-react-native (3.0.0):
     - React-Core
   - Yoga (0.0.0)
 
@@ -2441,6 +2470,7 @@ DEPENDENCIES:
   - ReactCodegen (from `build/generated/ios`)
   - ReactCommon/turbomodule/core (from `../node_modules/react-native/ReactCommon`)
   - ReactNativeCameraKit (from `../node_modules/react-native-camera-kit`)
+  - "RNCAsyncStorage (from `../node_modules/@react-native-async-storage/async-storage`)"
   - RNScreens (from `../node_modules/react-native-screens`)
   - RNSVG (from `../node_modules/react-native-svg`)
   - SocketRocket (~> 0.7.1)
@@ -2599,6 +2629,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native/ReactCommon"
   ReactNativeCameraKit:
     :path: "../node_modules/react-native-camera-kit"
+  RNCAsyncStorage:
+    :path: "../node_modules/@react-native-async-storage/async-storage"
   RNScreens:
     :path: "../node_modules/react-native-screens"
   RNSVG:
@@ -2682,10 +2714,11 @@ SPEC CHECKSUMS:
   ReactCodegen: 9ea66ee246511816b72e9d6e380f884b7b3b99d7
   ReactCommon: 7aca047f2f453a7d7f0adeccb63810d61829235a
   ReactNativeCameraKit: 8d3b9a09b32f10f50d56f8da0f3055eaa1a89c59
+  RNCAsyncStorage: 767abb068db6ad28b5f59a129fbc9fab18b377e2
   RNScreens: 75074e642b69b086813a943bdf63da7085fb2166
   RNSVG: e8fb86f41fccd7b67c4480bb9e179e0ad5785b80
   SocketRocket: d4aabe649be1e368d1318fdf28a022d714d65748
-  veyra-sdk-react-native: 3318af368ca052de030965eb33287d391940c87b
+  veyra-sdk-react-native: a33910c8cc8a7da6e6921fcdcc59c9bca6374937
   Yoga: 1c52fbd270869e556504def7e94fffbf67f53f7b
 
 PODFILE CHECKSUM: b1cce391bd4f37f3dd3754c7a7dbd95a30db0a6b

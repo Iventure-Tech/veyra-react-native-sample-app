@@ -33,17 +33,14 @@ export function ShowToPayScreen({
     tickRef.current = null;
   };
 
-  useEffect(() => {
-    const sub = wallet.onQrExpired(() => {
-      setExpired(true);
-      stopTimers();
-    });
-    return () => {
-      sub.remove();
+  // Leaving the screen stops the QR's expiry timer and drops its onExpired callback.
+  useEffect(
+    () => () => {
       stopTimers();
       wallet.cancelQrExpiry().catch(() => {});
-    };
-  }, []);
+    },
+    []
+  );
 
   const startWatching = (rendered: PaymentQr) => {
     stopTimers();
@@ -79,8 +76,12 @@ export function ShowToPayScreen({
     setOutcome(null);
     try {
       // No authentication call: showQrToPay raises the device authentication sheet itself,
-      // once per render — so a regenerate after expiry asks again on its own.
-      const rendered = await wallet.showQrToPay(Math.round(Number(amount) * 100));
+      // once per render — so a regenerate after expiry asks again on its own. onExpired fires once,
+      // for this QR only; a new render replaces it.
+      const rendered = await wallet.showQrToPay(Math.round(Number(amount) * 100), () => {
+        setExpired(true);
+        stopTimers();
+      });
       if (rendered.responseStatus !== 'APPROVED' || !rendered.payload) {
         // No QR was made (NOT_SENT: nothing left the phone). The customer dismissing the sheet is
         // not worth a dialog — they just chose not to pay. Everything else is worth showing.

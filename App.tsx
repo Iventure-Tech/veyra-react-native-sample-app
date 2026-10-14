@@ -41,7 +41,7 @@ export type RootStackParamList = {
   Pay: undefined;
   AddCard: undefined;
   ScanToPay: undefined;
-  ShowToPay: { cardId: string };
+  ShowToPay: { tokenUniqueReference: string };
   WalletTransactions: { tokenUniqueReference: string };
   WalletReceipts: undefined;
   /** Terminal outcome of any rail — tap, merchant QR, customer QR, scan-to-pay. */

@@ -59,18 +59,6 @@ export function AddCardScreen({
       .catch(() => {});
   }, []);
 
-  useEffect(() => {
-    const sub = wallet.onActivationEvent((e) => {
-      if (e.tokenUniqueReference !== tokenRef) return;
-      if (e.event === 'activated') {
-        Alert.alert('Card activated', 'Your card is ready to pay.');
-        navigation.goBack();
-      }
-      if (e.event === 'timeout') setStep('enterCode');
-    });
-    return () => sub.remove();
-  }, [tokenRef, navigation]);
-
   // The activation observer must not outlive this screen.
   useEffect(
     () => () => {
@@ -219,7 +207,7 @@ export function AddCardScreen({
   const requestCode = async (method: ActivationMethodInfo) => {
     if (!tokenRef) return;
     try {
-      const sent = await wallet.requestActivationCode(tokenRef, method.medium, method.contact);
+      const sent = await wallet.requestActivationCode(tokenRef, method.medium);
       if (sent.responseStatus !== 'APPROVED') {
         Alert.alert(
           'Could not send code',
@@ -227,7 +215,15 @@ export function AddCardScreen({
         );
         return;
       }
-      await wallet.observeActivation(tokenRef);
+      // Activated out of band (call centre, issuer app) while the code is being typed: close.
+      await wallet.observeActivation(
+        tokenRef,
+        () => {
+          Alert.alert('Card activated', 'Your card is ready to pay.');
+          navigation.goBack();
+        },
+        () => setStep('enterCode')
+      );
       observedRef.current = tokenRef;
       setStep('enterCode');
     } catch (e) {

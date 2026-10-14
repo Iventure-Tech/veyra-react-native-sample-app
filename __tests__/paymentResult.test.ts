@@ -34,11 +34,10 @@ describe('AUTO_RETURN_MS', () => {
 
 const tap = (over: Partial<TapResult> = {}): TapResult => ({
   responseCode: null,
-  responseStatus: null,
+  responseStatus: 'PENDING',
   responseStatusReason: null,
-  status: null,
   message: null,
-  amountDisplay: null,
+  amountMinorUnits: null,
   cardScheme: null,
   maskedTokenLast4: null,
   merchantTransactionReference: null,
@@ -163,7 +162,7 @@ describe('tapResultToParams', () => {
     );
   });
 
-  it('treats an absent or unknown status as pending, never as a failure', () => {
+  it('treats a pending or unknown status as pending, never as a failure', () => {
     expect(tapResultToParams(tap(), 500).outcome).toBe('pending');
     expect(tapResultToParams(tap({ responseStatus: 'SETTLING' }), 500).outcome).toBe('pending');
   });
@@ -458,7 +457,7 @@ describe('orderLookupText', () => {
     answeredBy: 'GATEWAY',
     ...over,
   });
-  const found = (o: OrderPaymentStatus) => ({ value: o, failureReason: null, message: null });
+  const found = (o: OrderPaymentStatus) => ({ value: o, failureReason: null, message: null, checked: true });
 
   it('a paid order: never take another payment', () => {
     expect(orderLookupText(found(order()))).toContain('do not take another payment for this order');
@@ -482,7 +481,7 @@ describe('orderLookupText', () => {
   });
   it('the gateway could not be asked: says why, and shows what the device holds', () => {
     expect(
-      orderLookupText({ value: null, failureReason: 'NO_NETWORK_CONNECTION', message: null })
+      orderLookupText({ value: null, failureReason: 'NO_NETWORK_CONNECTION', message: null, checked: false })
     ).toBe('No record of this order on this device. Could not ask the gateway: NO_NETWORK_CONNECTION.');
   });
 });

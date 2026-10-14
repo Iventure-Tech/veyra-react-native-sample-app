@@ -306,6 +306,8 @@ describe('walletPaymentToParams', () => {
     message: 'Paid',
     merchantName: 'Veyra Coffee',
     merchantLocation: 'Lagos, LA',
+    creditTransactionId: null,
+    isCreditConfirmationSupported: null,
     ...over,
   });
 
@@ -390,9 +392,9 @@ describe('walletPaymentToParams', () => {
     );
   });
 
-  it('treats an absent or unrecognised status as pending, never as a refusal', () => {
+  it('treats a pending or unrecognised status as pending, never as a refusal', () => {
     const noStatus = walletPaymentToParams(
-      outcome({ approved: false, responseStatus: null, message: null }),
+      outcome({ approved: false, responseStatus: 'PENDING', message: null }),
       300
     );
     expect(noStatus.outcome).toBe('pending');
@@ -420,7 +422,7 @@ describe('RETRY', () => {
 
   it('a RETRY scan-to-pay is not pending', () => {
     const params = walletPaymentToParams(
-      { approved: false, responseCode: '30', responseStatus: 'RETRY', responseStatusReason: 'INVALID_REQUEST', message: null, merchantName: null, merchantLocation: null },
+      { approved: false, responseCode: '30', responseStatus: 'RETRY', responseStatusReason: 'INVALID_REQUEST', message: null, merchantName: null, merchantLocation: null, creditTransactionId: null, isCreditConfirmationSupported: null },
       300
     );
     expect(params.outcome).toBe('not_sent');

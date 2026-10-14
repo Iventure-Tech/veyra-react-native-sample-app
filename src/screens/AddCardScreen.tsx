@@ -87,11 +87,9 @@ export function AddCardScreen({
       ? 'the customer ID'
       : !accountHolderName
         ? 'the account holder name'
-        : !bvn
-          ? 'the BVN'
-          : !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)
-            ? 'a valid email'
-            : null;
+        : !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)
+          ? 'a valid email'
+          : null;
     if (missing) {
       Alert.alert('Missing details', `Enter ${missing}.`);
       return;
@@ -135,7 +133,9 @@ export function AddCardScreen({
           emailAddress: email,
           recommendation: 'APPROVE', // your app's own risk decision — never hardcode in production
           consumerIdentifier: customerId,
-          bvn,
+          // Optional: an issuer's own app may leave it out (the backend refuses a non-issuer app
+          // with BVN_REQUIRED). An empty field is sent as no BVN at all, never as "".
+          bvn: bvn || undefined,
           accountHolderAddress: form.accountHolderAddress,
           mobileNumber: form.mobileNumber,
           accountNumberSource: 'MANUAL',
@@ -284,7 +284,7 @@ export function AddCardScreen({
           />
           <Field label="Customer ID" value={form.customerId} onChangeText={(v) => setForm({ ...form, customerId: v })} />
           <Field label="Account holder name" value={form.accountHolderName} onChangeText={(v) => setForm({ ...form, accountHolderName: v })} />
-          <Field label="BVN" value={form.bvn} onChangeText={(v) => setForm({ ...form, bvn: v })} keyboardType="numeric" />
+          <Field label="BVN (optional)" value={form.bvn} onChangeText={(v) => setForm({ ...form, bvn: v })} keyboardType="numeric" />
           <Field label="Email" value={form.emailAddress} onChangeText={(v) => setForm({ ...form, emailAddress: v })} keyboardType="email-address" />
           <Field label="Mobile number" value={form.mobileNumber} onChangeText={(v) => setForm({ ...form, mobileNumber: v })} keyboardType="phone-pad" />
           <Field label="Address" value={form.accountHolderAddress} onChangeText={(v) => setForm({ ...form, accountHolderAddress: v })} />

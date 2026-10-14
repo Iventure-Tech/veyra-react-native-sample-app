@@ -43,12 +43,12 @@ async function initializeFor(customerId: string): Promise<void> {
   // How both SDKs reach Veyra — one provider, chosen in src/provider.ts (appProvider) from the
   // values in veyra.config.ts. A missing value it needs throws here, naming it, and the launch
   // shows it.
-  return Veyra.initialize({
+  // (customerId, config, provider) — the same order as Android and iOS.
+  return Veyra.initialize(
     customerId,
-    provider: appProvider(VEYRA_PROVIDER),
-    softpos: VEYRA_CONFIG.softpos,
-    wallet: VEYRA_CONFIG.wallet,
-  });
+    { softpos: VEYRA_CONFIG.softpos, wallet: VEYRA_CONFIG.wallet },
+    appProvider(VEYRA_PROVIDER),
+  );
 }
 
 /**

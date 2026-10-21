@@ -533,7 +533,7 @@ await Veyra.initialize(customerId, {
 | `wallet` key | Required | Description |
 |---|---|---|
 | `requestTimeoutSeconds` | Optional | The longest the wallet SDK waits for one backend call, whole seconds 5–60. Unset keeps the SDK's own timeouts (§4.3). |
-| `requireQrAuthenticationPrompt` | Optional | Default `true`: show the authentication sheet before every QR payment. `false` skips it when the phone's secure hardware confirms a recent unlock — see *Skipping the sheet after a recent unlock* in §6.5. |
+| `requireAdditionalQrAuthenticationPrompt` | Optional | Default `true`: show the authentication sheet before every QR payment. `false` skips it when the phone's secure hardware confirms a recent unlock — see *Skipping the sheet after a recent unlock* in §6.5. |
 | `cdcvmPayTitle` / `cdcvmPaySubtitle` / `cdcvmShowQrTitle` / `cdcvmShowQrSubtitle` / `cdcvmAllowDeviceCredential` | Optional | The authentication sheet's wording and whether it offers the device passcode (§6.5). |
 
 ## 5. Sessions — how payment screens work in React Native
@@ -773,7 +773,7 @@ answers `NFC_UNAVAILABLE`, `closePaySession` does nothing, `isPaySessionOpen()` 
 Select the token with `setActiveToken` (§6.3); on Android that arms it for tapping.
 
 **A tap never asks before paying** — there is no moment to show a sheet while the phone is held
-against the reader, and `requireQrAuthenticationPrompt` does not apply. Instead the tap needs the
+against the reader, and `requireAdditionalQrAuthenticationPrompt` does not apply. Instead the tap needs the
 phone unlocked now, with a strong biometric or the screen lock used in the last 5 minutes; the
 phone's secure hardware (the TEE) checks this. A tap without it is refused (the phone buzzes twice),
 and the SDK then shows the device authentication sheet ("Unlock to pay — Then hold your phone to the
@@ -881,14 +881,14 @@ The sheet's wording is the SDK's own unless you set it. `VeyraWalletConfig` take
 (default `true`) controls whether the sheet offers the device passcode as well as biometrics.
 
 **Skipping the sheet after a recent unlock.** By default the SDK shows the sheet before **every**
-QR payment. Set `requireQrAuthenticationPrompt: false` to skip it when the customer has just
+QR payment. Set `requireAdditionalQrAuthenticationPrompt: false` to skip it when the customer has just
 unlocked the phone:
 
 ```ts
 await Veyra.initialize(customerId, {
   wallet: {
     environment: 'TEST', paymentAppProviderId, tokenRequestorId,
-    requireQrAuthenticationPrompt: false,   // default true: always ask
+    requireAdditionalQrAuthenticationPrompt: false,   // default true: always ask
   },
 }, provider);
 ```

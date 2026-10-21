@@ -772,11 +772,13 @@ answers `NFC_UNAVAILABLE`, `closePaySession` does nothing, `isPaySessionOpen()` 
 
 Select the token with `setActiveToken` (§6.3); on Android that arms it for tapping.
 
-**A tap never shows an authentication sheet** — there is no moment to show one while the phone is
-held against the reader, and `requireQrAuthenticationPrompt` does not apply. Instead the tap needs
-the phone unlocked now, with a strong biometric or the screen lock used in the last 5 minutes; the
-phone's secure hardware (the TEE) checks this. A tap without it is refused: the customer unlocks the
-phone and taps again.
+**A tap never asks before paying** — there is no moment to show a sheet while the phone is held
+against the reader, and `requireQrAuthenticationPrompt` does not apply. Instead the tap needs the
+phone unlocked now, with a strong biometric or the screen lock used in the last 5 minutes; the
+phone's secure hardware (the TEE) checks this. A tap without it is refused (the phone buzzes twice),
+and the SDK then shows the device authentication sheet ("Unlock to pay — Then hold your phone to the
+reader again"). Once the customer authenticates, they **tap again** to pay; the refused tap is not
+completed.
 
 **Disarming and re-arming on the pay screen.** On Cancel, or when your own countdown expires,
 call `wallet.closePaySession()`. A "Try again" button calls `wallet.openPaySession()`, which

@@ -17,7 +17,8 @@ React Native app.
 
 | | Android | iOS |
 |---|---|---|
-| OS floor | Android 9 (API 28) | iOS 15 |
+| OS floor | Android 9 (API 28) — wallet and SoftPOS alike | iOS 15 |
+| Screen lock | a PIN, pattern or password, to add a card (§6.1) | a passcode, to add a card (§6.1) |
 | React Native | **0.80+** out of the box; 0.79 with a Kotlin override (see below) | same |
 | Device | physical, NFC-capable | physical iPhone |
 | Extra | — | Apple Developer **Team ID** (App Attest) |
@@ -527,6 +528,14 @@ await Veyra.initialize(customerId, {
   will be pending rather than final. A longer one gets more final answers on a slow network,
   but the user waits longer.
 
+### 4.4 Optional wallet settings
+
+| `wallet` key | Required | Description |
+|---|---|---|
+| `requestTimeoutSeconds` | Optional | The longest the wallet SDK waits for one backend call, whole seconds 5–60. Unset keeps the SDK's own timeouts (§4.3). |
+| `requireAdditionalQrAuthenticationPrompt` | Optional | Default `true`: show the authentication sheet before every QR payment. `false` skips it when the phone's secure hardware confirms a recent unlock — see *Skipping the sheet after a recent unlock* in §6.5. |
+| `cdcvmPayTitle` / `cdcvmPaySubtitle` / `cdcvmShowQrTitle` / `cdcvmShowQrSubtitle` / `cdcvmAllowDeviceCredential` | Optional | The authentication sheet's wording and whether it offers the device passcode (§6.5). |
+
 ## 5. Sessions — how payment screens work in React Native
 
 **This is the one genuinely React-Native-specific concept.** The SDK arms the device
@@ -610,6 +619,18 @@ code — including none at all — means this SDK version cannot interpret the a
 **discarded** (nothing provisioned, no card added, even if the response carried full token data)
 and the call resolves `FAILED` with reason `UNRECOGNISED_RESPONSE_CODE` (§9.2, Table A). Start a
 new add-card, and update the SDK if it persists.
+**Screen lock and the card's payment keys.** The card's payment keys on the phone are protected by
+the phone's secure hardware (the TEE on Android, the Secure Enclave on iOS), which ties them to the
+screen lock:
+
+- **No screen lock, no card.** A phone with no PIN/pattern/password (Android) or no passcode (iOS)
+  cannot hold payment keys, so adding a card fails there. Ask the customer to set one first.
+- **Removing the screen lock deletes the protecting keys.** The OS deletes them, and the SDK then
+  discards the cards' payment keys. Once a screen lock is set again, the SDK downloads new keys
+  online — the card must go online before it can pay.
+- **Existing installs migrate silently.** On the first launch after updating the SDK, cards already
+  on the phone are moved to the hardware-protected keys — no prompt and no network.
+
 `bankName` is kept on the stored card and not sent. `bvn`: Optional when your payment app provider is registered as the account issuer; otherwise the backend refuses with `BVN_REQUIRED`. A blank
 `bvn` is sent as absent. Without one, a provider that is not the issuer gets `'FAILED'` /
 `BVN_REQUIRED` (code `'DECLINED'`) and nothing is created: collect the BVN and add the card again.
@@ -751,6 +772,14 @@ answers `NFC_UNAVAILABLE`, `closePaySession` does nothing, `isPaySessionOpen()` 
 
 Select the token with `setActiveToken` (§6.3); on Android that arms it for tapping.
 
+**A tap never asks before paying** — there is no moment to show a sheet while the phone is held
+against the reader, and `requireAdditionalQrAuthenticationPrompt` does not apply. Instead the tap needs the
+phone unlocked now, with a strong biometric or the screen lock used in the last 5 minutes; the
+phone's secure hardware (the TEE) checks this. A tap without it is refused (the phone buzzes twice),
+and the SDK then shows the device authentication sheet ("Unlock to pay — Then hold your phone to the
+reader again"). Once the customer authenticates, they **tap again** to pay; the refused tap is not
+completed.
+
 **Disarming and re-arming on the pay screen.** On Cancel, or when your own countdown expires,
 call `wallet.closePaySession()`. A "Try again" button calls `wallet.openPaySession()`, which
 resolves a `PaySessionResult` (`{ responseStatus, responseStatusReason, message }`):
@@ -850,6 +879,32 @@ The sheet's wording is the SDK's own unless you set it. `VeyraWalletConfig` take
 `cdcvmPayTitle` / `cdcvmPaySubtitle` (scan-to-pay) and `cdcvmShowQrTitle` / `cdcvmShowQrSubtitle`
 (show-QR-to-pay); leave them out to keep the SDK's wording. `cdcvmAllowDeviceCredential`
 (default `true`) controls whether the sheet offers the device passcode as well as biometrics.
+
+**Skipping the sheet after a recent unlock.** By default the SDK shows the sheet before **every**
+QR payment. Set `requireAdditionalQrAuthenticationPrompt: false` to skip it when the customer has just
+unlocked the phone:
+
+```ts
+await Veyra.initialize(customerId, {
+  wallet: {
+    environment: 'TEST', paymentAppProviderId, tokenRequestorId,
+    requireAdditionalQrAuthenticationPrompt: false,   // default true: always ask
+  },
+}, provider);
+```
+
+| Setting | Phone state | What the customer sees |
+|---|---|---|
+| `true` (default) | any | one sheet |
+| `false` | recently unlocked (below) | no sheet |
+| `false` | not recently unlocked, or it cannot be confirmed | one sheet |
+
+"Recently unlocked" is checked by the phone's secure hardware, not by the SDK or your app. On
+Android (the TEE, through the Android Keystore): a strong biometric or the device PIN/pattern/password
+in the last 5 minutes, and the phone unlocked now. On iOS (the Secure Enclave): the phone is unlocked
+(Face ID, Touch ID or passcode) and a passcode is set. If the hardware cannot confirm it, the sheet
+is shown — once. A payment never shows more than one sheet. The three outcomes are unchanged:
+`AUTH_CANCELLED`, `AUTH_FAILED` and `AUTH_UNAVAILABLE`, all `NOT_SENT`.
 
 A verified inspection carries the amount (`amountMinorUnits`, plus `amountDisplay` for the
 screen), `currencyCode` (ISO 4217 numeric, three digits, e.g. `'566'`) and `merchantOrderId` — the merchant's order ID signed into the QR, and

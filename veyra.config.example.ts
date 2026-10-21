@@ -30,6 +30,8 @@ export const VEYRA_CONFIG: {
     // iOS only: your Apple Developer Team ID (App Attest binds to it).
     appleTeamId: 'YOURTEAMID',
     // Optional: requestTimeoutSeconds: 30 (whole seconds 5–60), as above.
+    // Optional: requireAdditionalQrAuthenticationPrompt: false — skip the authentication sheet before a QR
+    // payment when the phone was recently unlocked (the phone's secure hardware checks). Default true.
   },
 };
 

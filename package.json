@@ -21,7 +21,7 @@
     "react-native-safe-area-context": "5.5.2",
     "react-native-screens": "4.13.1",
     "react-native-svg": "^15.7.1",
-    "veyra-sdk-react-native": "3.0.2"
+    "veyra-sdk-react-native": "3.0.3"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0",

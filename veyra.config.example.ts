@@ -18,8 +18,8 @@ export const VEYRA_CONFIG: {
     // The payment app provider id from your onboarding pack — the same identifier the wallet
     // block carries. The gateway resolves your acquirer id and MCC from it.
     paymentAppProviderId: 'your-payment-app-provider-id',
-    // Optional: the longest the SDK waits for one backend call, whole seconds 5–60. Unset keeps
-    // the SDK's own timeouts; a payment that runs out of time ends PENDING, not failed.
+    // Optional: the longest the SDK waits for one backend call, whole seconds 5–60. Unset means
+    // 60 s; a payment that runs out of time ends PENDING, not failed.
     // requestTimeoutSeconds: 30,
   },
   wallet: {

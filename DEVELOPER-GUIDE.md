@@ -516,9 +516,9 @@ await Veyra.initialize(customerId, {
 
 - **Allowed values: whole seconds from 5 to 60.** Anything else makes `initialize` reject with
   `INVALID_CONFIGURATION`, naming the value and the range. The SDK never adjusts the value.
-- **Not set:** the SDK keeps its own timeouts. On iOS that is 60 s per call; on Android it
-  differs by call (up to about 40 s for most SoftPOS lookups and up to about 90 s for payments
-  and wallet calls).
+- **Not set:** 60 seconds, for every call, on iOS and Android.
+- **It is the limit for the whole call.** Connecting, sending and waiting for the answer all
+  count towards the same limit, so a call never takes longer than the value you set.
 - **It applies to every backend call the SDK makes,** including the token request and calls
   through your proxy provider (your backend's relay is given the same time limit). It does not
   change the NFC timeouts or the card-activation wait.
@@ -532,7 +532,7 @@ await Veyra.initialize(customerId, {
 
 | `wallet` key | Required | Description |
 |---|---|---|
-| `requestTimeoutSeconds` | Optional | The longest the wallet SDK waits for one backend call, whole seconds 5–60. Unset keeps the SDK's own timeouts (§4.3). |
+| `requestTimeoutSeconds` | Optional | The longest the wallet SDK waits for one backend call, whole seconds 5–60. Unset means 60 s (§4.3). |
 | `requireAdditionalQrAuthenticationPrompt` | Optional | Default `true`: show the authentication sheet before every QR payment. `false` skips it when the phone's secure hardware confirms a recent unlock — see *Skipping the sheet after a recent unlock* in §6.5. |
 | `cdcvmPayTitle` / `cdcvmPaySubtitle` / `cdcvmShowQrTitle` / `cdcvmShowQrSubtitle` / `cdcvmAllowDeviceCredential` | Optional | The authentication sheet's wording and whether it offers the device passcode (§6.5). |
 

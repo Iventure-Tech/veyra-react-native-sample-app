@@ -9,6 +9,7 @@ import {
   type TransactionSummary,
 } from 'veyra-sdk-react-native';
 import type { RootStackParamList } from '../../App';
+import { ACCEPTED_WALLET_MESSAGE } from '../paymentResult';
 import { theme } from '../theme';
 import { Scanner } from '../Scanner';
 import { ReceiptDetail } from './WalletReceiptsScreen';
@@ -99,7 +100,10 @@ export function WalletTransactionsScreen({
             prev?.map((r) => (r.transactionHash === transactionHash ? fresh : r)) ?? prev
         );
       }
-      if (isOpen(fresh)) {
+      if (fresh?.authorizationStatus === 'ACCEPTED') {
+        // Debited; the credit to the merchant's bank is queued. Not final.
+        setStatusNote(`${ACCEPTED_WALLET_MESSAGE}. The wallet will keep checking.`);
+      } else if (isOpen(fresh)) {
         setStatusNote('Still processing — the wallet will keep checking.');
       }
     } catch (e) {

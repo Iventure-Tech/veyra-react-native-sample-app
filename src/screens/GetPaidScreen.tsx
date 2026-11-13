@@ -16,6 +16,7 @@ import {
 import type { RootStackParamList } from '../../App';
 import { CANNOT_CANCEL_MESSAGE, cancelAction, cancelRefusedTooLate, isCancelledOutcome } from '../cancel';
 import {
+  acceptedToParams,
   contextSettlementToParams,
   cpmChargeToParams,
   DUPLICATE_MERCHANT_ORDER_ID,
@@ -36,7 +37,7 @@ type Rail = 'idle' | 'tap' | 'mpmCreating' | 'mpm' | 'cpmScan' | 'cpmConfirm' | 
  *
  * Required. The retry rule (`keepsOrderId`): an order can have several attempts. After
  * `NOT_SENT`, `RETRY`, `DECLINED` or `FAILED` no money moved, so the retry reuses the order id;
- * after `APPROVED` or `PENDING` the gateway refuses another payment for it
+ * after `APPROVED`, `ACCEPTED` or `PENDING` the gateway refuses another payment for it
  * (`DUPLICATE_MERCHANT_ORDER_ID`), so the next sale gets a new one. The reference itself is the
  * SDK's to mint and arrives on the outcome.
  */
@@ -87,7 +88,7 @@ export function GetPaidScreen({
     return id;
   };
 
-  /** After an outcome: keep the order id unless the order is paid or may be (APPROVED / PENDING). */
+  /** After an outcome: keep the order id unless the order is paid or may be (APPROVED / ACCEPTED / PENDING). */
   const attemptEnded = (status: ResponseStatus | null | undefined) => {
     retryOrderIdRef.current = keepsOrderId(status) ? currentOrderIdRef.current : null;
   };
@@ -301,6 +302,20 @@ export function GetPaidScreen({
         if (status.state === 'EXPIRED') {
           setMpmExpired(true);
           if (pollRef.current) clearInterval(pollRef.current);
+          return;
+        }
+        if (!status.isSettled) {
+          // Not settled. The customer's bank may have accepted the push (debited, credit queued):
+          // the SDK puts that on the stored row, so read it. The QR comes down and the result
+          // screen waits for the final status.
+          const row = await softpos.getTransaction(txRef).catch(() => null);
+          if (row?.status !== 'ACCEPTED' || !pollRef.current) return;
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+          setRail('idle');
+          setMpmQr(null);
+          softpos.cancelQrExpiry().catch(() => {});
+          navigation.navigate('PaymentResult', acceptedToParams(txRef, null, chargedRef.current));
           return;
         }
         if (status.isSettled) {

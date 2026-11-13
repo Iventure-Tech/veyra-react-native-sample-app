@@ -15,7 +15,7 @@ import type {
  * result page. The mapping lives here rather than in the screens so each rail's outcome is
  * turned into the same shape in one place (and can be unit-tested without a renderer).
  */
-export type PaymentResultOutcome = 'approved' | 'declined' | 'pending' | 'not_sent';
+export type PaymentResultOutcome = 'approved' | 'declined' | 'pending' | 'accepted' | 'not_sent';
 
 export interface PaymentResultParams {
   outcome: PaymentResultOutcome;
@@ -33,7 +33,8 @@ export interface PaymentResultParams {
    */
   receiptFor?: string;
   /**
-   * Merchant transaction reference of a sale that is **not final yet**. The result screen
+   * Merchant transaction reference of a sale that is **not final yet** (`PENDING` or
+   * `ACCEPTED`). The result screen
    * subscribes to `softpos.observeTransactionResolved` for it (and reads the stored row on mount,
    * for the answer that landed before the screen opened) and shows the settled outcome in
    * place, so the merchant is not left staring at "Pending" until they navigate away.
@@ -70,6 +71,26 @@ export const AUTO_RETURN_MS = 60000;
 const PENDING_MESSAGE =
   'Status unknown. The issuer may have approved. Check transactions for updates.';
 
+/**
+ * `ACCEPTED`: the customer was debited and the credit to the merchant's bank is queued. It is
+ * **not final**. The SDK keeps checking it exactly as it does a `PENDING` payment, and it becomes
+ * `APPROVED`, or `FAILED` with `CREDIT_FAILED` (the credit failed and the debit was reversed).
+ * Until then: the merchant waits before releasing goods, there is no receipt and no credit
+ * confirmation, and the order id is held (never take another payment for the order).
+ */
+export const ACCEPTED_MERCHANT_MESSAGE =
+  'Payment accepted - customer debited. Wait for approval before releasing goods';
+const ACCEPTED_MERCHANT_DETAIL =
+  'Not final yet. Do not release goods until this payment is approved. The app keeps checking and will show the result here.';
+export const ACCEPTED_WALLET_MESSAGE = 'Payment accepted - waiting for credit approval';
+const ACCEPTED_WALLET_DETAIL =
+  "You have been debited and the merchant's bank is being credited. Don't pay again - the result will show in your transactions.";
+
+/** The reason on an accepted payment whose credit failed: the customer's debit was reversed. */
+export const CREDIT_FAILED = 'CREDIT_FAILED';
+const CREDIT_FAILED_MESSAGE =
+  "The credit to the merchant's bank failed and the customer's debit was reversed";
+
 const NOT_SENT_DETAIL = 'Nothing was charged. Fix the reason and try again with the same order.';
 const RETRY_MESSAGE = 'Payment not sent to the bank - retry with the same order ID';
 
@@ -82,9 +103,93 @@ export const DUPLICATE_MERCHANT_ORDER_ID = 'DUPLICATE_MERCHANT_ORDER_ID';
  * it is still being confirmed.
  */
 export function duplicateOrderMessage(original: OriginalPayment | null | undefined): string {
-  return original?.responseStatus === 'PENDING'
-    ? 'A payment for this order is still being confirmed - do not take another payment'
-    : 'This order is already paid - do not take another payment';
+  switch (original?.responseStatus) {
+    case 'PENDING':
+      return 'A payment for this order is still being confirmed - do not take another payment';
+    case 'ACCEPTED':
+      // The customer was debited and the credit is queued: not paid yet, and never retried.
+      return 'A payment for this order is accepted and waiting for approval - do not take another payment';
+    default:
+      return 'This order is already paid - do not take another payment';
+  }
+}
+
+/**
+ * An `ACCEPTED` sale on any merchant rail (tap, customer QR, merchant QR). No `receiptFor` and no
+ * `creditConfirmation`: neither exists until the payment is `APPROVED`. `resolvesFor` makes the
+ * result screen wait on the sale and show its final status in place.
+ */
+export function acceptedToParams(
+  reference: string | null | undefined,
+  message: string | null | undefined,
+  amountMinorUnits: number
+): PaymentResultParams {
+  return {
+    outcome: 'accepted',
+    title: 'Payment Accepted',
+    message: message || ACCEPTED_MERCHANT_MESSAGE,
+    amountMinorUnits,
+    details: lines(ACCEPTED_MERCHANT_DETAIL, reference && `Reference: ${reference}`),
+    resolvesFor: reference ?? undefined,
+  };
+}
+
+/** How a sale the result screen is waiting on reads now. */
+export interface PaymentResolution {
+  /** False only for `ACCEPTED`: the screen keeps waiting and offers no receipt. */
+  final: boolean;
+  outcome: PaymentResultOutcome;
+  title: string;
+  message: string;
+}
+
+/**
+ * What the result screen shows for a waited-on sale, from the status and reason on its stored row
+ * or on a `softpos.observeTransactionResolved` event. That observer fires once with `ACCEPTED`
+ * (not final: keep waiting) and again with the final status. `null` means nothing new to show:
+ * the sale is still `PENDING`, or carries a status this app does not know (unresolved).
+ */
+export function resolutionOf(
+  status: string | null | undefined,
+  reason: string | null | undefined
+): PaymentResolution | null {
+  switch (status) {
+    case 'ACCEPTED':
+      return {
+        final: false,
+        outcome: 'accepted',
+        title: 'Payment Accepted',
+        message: ACCEPTED_MERCHANT_MESSAGE,
+      };
+    case 'APPROVED':
+      return { final: true, outcome: 'approved', title: 'Payment Successful', message: 'Transaction approved' };
+    case 'DECLINED':
+      return {
+        final: true,
+        outcome: 'declined',
+        title: 'Payment Declined',
+        message: withReason('Transaction declined', reason),
+      };
+    case 'FAILED':
+      return {
+        final: true,
+        outcome: 'declined',
+        title: 'Payment Failed',
+        message: withReason(
+          reason === CREDIT_FAILED ? CREDIT_FAILED_MESSAGE : 'Transaction not completed',
+          reason
+        ),
+      };
+    case 'RETRY':
+      return {
+        final: true,
+        outcome: 'not_sent',
+        title: 'Payment Not Sent',
+        message: withReason(RETRY_MESSAGE, reason),
+      };
+    default:
+      return null;
+  }
 }
 
 /** The reason in brackets after a message, when there is one. */
@@ -134,6 +239,10 @@ export function tapResultToParams(
               }
             : undefined,
       };
+    case 'ACCEPTED':
+      // The customer was debited and the credit is queued. Not final: no receipt, no credit
+      // confirmation, no retry. The merchant waits for the approval.
+      return acceptedToParams(reference, result.message, amountMinorUnits);
     case 'NOT_SENT':
       // Never reached the gateway: nothing was charged or recorded, so no receipt.
       return {
@@ -276,6 +385,8 @@ export function cpmChargeToParams(
               }
             : undefined,
       };
+    case 'ACCEPTED':
+      return acceptedToParams(reference, outcome.message, amountMinorUnits);
     case 'NOT_SENT':
       return notSentToParams(outcome.message, reason, amountMinorUnits);
     case 'RETRY':
@@ -354,6 +465,22 @@ export function walletPaymentToParams(
       details: ['Nothing was paid. Fix the reason and try again.'],
     };
   }
+  if (stated === 'ACCEPTED') {
+    // Debited; the credit to the merchant's bank is queued. Not final and not a refusal: the SDK
+    // keeps checking and the row becomes APPROVED, or FAILED when the credit fails.
+    return {
+      outcome: 'accepted',
+      title: 'Payment Accepted',
+      message: outcome.message ?? ACCEPTED_WALLET_MESSAGE,
+      amountMinorUnits,
+      details: lines(
+        outcome.merchantName,
+        outcome.merchantLocation,
+        `Response: ${outcome.responseCode ?? '-'}`,
+        ACCEPTED_WALLET_DETAIL
+      ),
+    };
+  }
   const state: PaymentResultOutcome =
     stated === 'APPROVED'
       ? 'approved'
@@ -389,8 +516,8 @@ export const DEVICE_NOT_BOUND_MESSAGE =
 
 /**
  * The retry rule for your order id. An order can have several attempts: after `NOT_SENT`, `RETRY`,
- * `DECLINED` or `FAILED` no money moved, so the retry keeps the **same** order id. After `APPROVED`
- * or `PENDING` — or a status this app does not know, which is treated as pending — the order is
+ * `DECLINED` or `FAILED` no money moved, so the retry keeps the **same** order id. After `APPROVED`,
+ * `ACCEPTED` or `PENDING` — or a status this app does not know, which is treated as pending — the order is
  * paid or may be, and the gateway refuses another payment for it (`DUPLICATE_MERCHANT_ORDER_ID`).
  */
 export function keepsOrderId(status: ResponseStatus | null | undefined): boolean {
@@ -413,6 +540,10 @@ export function orderLookupText(lookup: VeyraLookup<OrderPaymentStatus>): string
         break;
       case 'PENDING':
         text = 'A payment may still be going through - do not take another payment yet.';
+        break;
+      case 'ACCEPTED':
+        text =
+          'A payment is accepted and waiting for approval - do not take another payment, and do not release goods yet.';
         break;
       default: {
         const reason = order.responseStatusReason ? ` · ${order.responseStatusReason}` : '';

@@ -92,6 +92,8 @@ export function ReceiptDetail(props: {
     ['Time', r.transactionTime],
     ['Card', r.maskedToken],
     ['Reference', r.merchantTransactionReference],
+    ['Transaction ID', r.transactionId],
+    ['Credit transaction ID', r.creditTransactionId],
   ];
   return (
     <ScrollView contentContainerStyle={styles.container}>

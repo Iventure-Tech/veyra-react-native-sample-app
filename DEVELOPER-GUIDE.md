@@ -961,8 +961,11 @@ merchant receipt, `getReceipts(limit?)`, `getReceiptForTransaction(hash)`.
 `entryMethod` is `'TAP' | 'QR_GENERATED' | 'QR_SCANNED'`.
 A `TransactionSummary` carries `amountMinorUnits`, `currencyCode` (ISO 4217 numeric, three digits,
 e.g. `'566'`) and `tokenUniqueReference` (the token that paid). A `TransactionReceipt` carries
-`totalAmountMinorUnits` (a number, in minor units), `totalAmountFormatted` for display, and
-`currencyCode`.
+`totalAmountMinorUnits` (a number, in minor units), `totalAmountFormatted` for display,
+`currencyCode`, and `creditTransactionId`: the merchant's credit identifier (NIP session id
+inter-bank, batch reference intra-bank), when known. The SDK takes it from the wallet's own record
+of the payment and, failing that, from the merchant's receipt QR; it is `null` when neither knows
+it. A receipt whose credit id disagrees with the wallet's record is refused `RECEIPT_MISMATCH`.
 
 Both of these **resolve**; only a setup mistake rejects.
 
@@ -975,7 +978,7 @@ reason:
 |---|---|---|
 | `INVALID_RECEIPT` | not a Veyra receipt QR, or one with a missing or unreadable field | ask the customer to scan the merchant's receipt QR |
 | `RECEIPT_NOT_FROM_THIS_WALLET` | no payment made by this wallet matches it | tell the customer it is not their receipt |
-| `RECEIPT_MISMATCH` | it matches a payment, but its amount, currency, date, merchant or reference disagree with this wallet's record | do not store or show it as proof of payment |
+| `RECEIPT_MISMATCH` | it matches a payment, but its amount, currency, date, merchant, reference or credit transaction id disagree with this wallet's record | do not store or show it as proof of payment |
 | `PAYMENT_NOT_CONFIRMED` | the matching payment's outcome is not confirmed yet | scan again shortly |
 | `RECEIPT_FOR_ANOTHER_TRANSACTION` | the scan was opened for one transaction (`expectedHash`) and the receipt is for another | open the scan from the right transaction |
 | `SDK_INTERNAL_ERROR` | the SDK failed inside itself | report to support |
@@ -2403,7 +2406,7 @@ digitisation (tap, `chargeCustomerQr`, `createPaymentContext`, `payScannedContex
 | `FAILED` | — | `CARD_DATA_MISSING` | `setActiveToken` (Android): the card is listed but its payment data is not on this phone | remove the card and add it again |
 | `FAILED` | — | `INVALID_RECEIPT` | `processReceipt`: not a Veyra receipt QR, or a field is missing or unreadable | ask for the merchant's receipt QR |
 | `FAILED` | — | `RECEIPT_NOT_FROM_THIS_WALLET` | `processReceipt`: no payment made by this wallet matches it | tell the customer it is not their receipt |
-| `FAILED` | — | `RECEIPT_MISMATCH` | `processReceipt`: amount, currency, date, merchant or reference disagree with this wallet's record | don't store or show it as proof |
+| `FAILED` | — | `RECEIPT_MISMATCH` | `processReceipt`: amount, currency, date, merchant, reference or credit transaction id disagree with this wallet's record | don't store or show it as proof |
 | `FAILED` | — | `PAYMENT_NOT_CONFIRMED` | `processReceipt`: the payment's outcome is not confirmed yet | scan again shortly |
 | `FAILED` | — | `RECEIPT_FOR_ANOTHER_TRANSACTION` | `processReceipt` with `expectedHash`: the receipt is for another transaction | open the scan from the right transaction |
 | `FAILED` | — | `UNRECOGNISED_RESPONSE_CODE` | **add-card only**: the Veyra token service answered with a code this SDK version doesn't know; the card was discarded, nothing stored | start a new add-card; update the SDK if it persists |

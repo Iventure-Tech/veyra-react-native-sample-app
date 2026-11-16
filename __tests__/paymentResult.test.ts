@@ -12,14 +12,18 @@ import type {
   PaymentOutcome,
 } from 'veyra-sdk-react-native';
 import {
+  ACCEPTED_MERCHANT_MESSAGE,
+  ACCEPTED_WALLET_MESSAGE,
   AUTO_RETURN_MS,
   DEVICE_NOT_BOUND_MESSAGE,
   DEVICE_NOT_BOUND_TITLE,
   contextSettlementToParams,
   cpmChargeToParams,
+  acceptedToParams,
   duplicateOrderMessage,
   keepsOrderId,
   orderLookupText,
+  resolutionOf,
   tapResultToParams,
   walletPaymentToParams,
 } from '../src/paymentResult';
@@ -485,5 +489,180 @@ describe('orderLookupText', () => {
     expect(
       orderLookupText({ value: null, failureReason: 'NO_NETWORK_CONNECTION', message: null, checked: false })
     ).toBe('No record of this order on this device. Could not ask the gateway: NO_NETWORK_CONNECTION.');
+  });
+});
+
+/**
+ * ACCEPTED: the customer was debited and the credit to the merchant's bank is queued. It is not
+ * final. The merchant is told to wait, there is no receipt and no credit confirmation, the order
+ * id is held, and the result screen keeps waiting for the final status.
+ */
+describe('ACCEPTED', () => {
+  const acceptedTap = () =>
+    tap({
+      responseCode: '09',
+      responseStatus: 'ACCEPTED',
+      responseStatusReason: 'ACCEPTED',
+      message: 'Payment accepted - customer debited. Wait for approval before releasing goods (ACCEPTED)',
+      merchantTransactionReference: 'REF-ACC',
+      // Flags an approval would act on: an accepted sale must ignore them.
+      isCreditConfirmationSupported: true,
+      creditTransactionId: 'CR-1',
+    });
+
+  it('a tap reads as accepted, not approved and not pending', () => {
+    const params = tapResultToParams(acceptedTap(), 5000);
+    expect(params.outcome).toBe('accepted');
+    expect(params.title).toBe('Payment Accepted');
+    expect(params.message).toContain('Wait for approval before releasing goods');
+  });
+
+  it('offers no receipt and no credit confirmation, and waits on the reference', () => {
+    const params = tapResultToParams(acceptedTap(), 5000);
+    expect(params.receiptFor).toBeUndefined();
+    expect(params.creditConfirmation).toBeUndefined();
+    expect(params.resolvesFor).toBe('REF-ACC');
+  });
+
+  it('falls back to the wait-for-approval sentence when the SDK sent no message', () => {
+    expect(acceptedToParams('REF-ACC', null, 5000).message).toBe(ACCEPTED_MERCHANT_MESSAGE);
+    expect(acceptedToParams('REF-ACC', '', 5000).message).toBe(ACCEPTED_MERCHANT_MESSAGE);
+  });
+
+  it('an accepted sale with no reference still shows, with nothing to wait on', () => {
+    const params = acceptedToParams(null, null, 5000);
+    expect(params.outcome).toBe('accepted');
+    expect(params.resolvesFor).toBeUndefined();
+  });
+
+  it('a customer QR charge reads the same way', () => {
+    const params = cpmChargeToParams(
+      {
+        approved: false,
+        responseStatus: 'ACCEPTED',
+        responseStatusReason: 'ACCEPTED',
+        message: null,
+        responseCode: '09',
+        transactionId: 'TXN-9',
+        merchantTransactionReference: 'REF-CPM',
+        merchantOrderId: 'ORDER-1',
+        creditTransactionId: null,
+        isCreditConfirmationSupported: true,
+        originalPayment: null,
+      },
+      700
+    );
+    expect(params.outcome).toBe('accepted');
+    expect(params.message).toBe(ACCEPTED_MERCHANT_MESSAGE);
+    expect(params.receiptFor).toBeUndefined();
+    expect(params.creditConfirmation).toBeUndefined();
+    expect(params.resolvesFor).toBe('REF-CPM');
+  });
+
+  it('the payer is told it is accepted and waiting for credit approval, never refused or pending', () => {
+    const params = walletPaymentToParams(
+      {
+        approved: false,
+        responseCode: '09',
+        responseStatus: 'ACCEPTED',
+        responseStatusReason: 'ACCEPTED',
+        message: null,
+        merchantName: 'Veyra Coffee',
+        merchantLocation: 'Lagos, LA',
+        creditTransactionId: null,
+        isCreditConfirmationSupported: null,
+      },
+      900
+    );
+    expect(params.outcome).toBe('accepted');
+    expect(params.title).toBe('Payment Accepted');
+    expect(params.message).toBe(ACCEPTED_WALLET_MESSAGE);
+    expect(params.receiptFor).toBeUndefined();
+  });
+
+  it('holds the order id: never another payment for the order', () => {
+    expect(keepsOrderId('ACCEPTED')).toBe(false);
+  });
+
+  it('a duplicate order whose original payment is accepted says so', () => {
+    expect(
+      duplicateOrderMessage({
+        responseCode: '09', responseStatus: 'ACCEPTED', responseStatusReason: 'ACCEPTED',
+        amountMinorUnits: 100, merchantTransactionReference: 'REF-ORIG', transactionId: 'TX-ORIG',
+      })
+    ).toBe('A payment for this order is accepted and waiting for approval - do not take another payment');
+  });
+
+  it('an order lookup that answers ACCEPTED: no second payment and no goods yet', () => {
+    const text = orderLookupText({
+      value: {
+        merchantOrderId: 'ORDER-1',
+        responseStatus: 'ACCEPTED',
+        responseStatusReason: 'ACCEPTED',
+        responseCode: '09',
+        merchantTransactionReference: 'REF-1',
+        transactionId: 'TX-1',
+        amountMinorUnits: 1000,
+        attempts: [],
+        answeredBy: 'GATEWAY',
+      },
+      failureReason: null,
+      message: null,
+      checked: true,
+    });
+    expect(text).toContain('accepted and waiting for approval');
+    expect(text).toContain('do not release goods yet');
+    expect(text).not.toContain('Not paid');
+  });
+});
+
+describe('resolutionOf', () => {
+  // The resolved observer fires once with ACCEPTED and again with the final status.
+  it('ACCEPTED is not final: the screen keeps waiting', () => {
+    const r = resolutionOf('ACCEPTED', 'ACCEPTED');
+    expect(r).toEqual({
+      final: false,
+      outcome: 'accepted',
+      title: 'Payment Accepted',
+      message: ACCEPTED_MERCHANT_MESSAGE,
+    });
+  });
+
+  it('APPROVED after ACCEPTED is final and reads as paid', () => {
+    const r = resolutionOf('APPROVED', 'APPROVED');
+    expect(r?.final).toBe(true);
+    expect(r?.outcome).toBe('approved');
+    expect(r?.title).toBe('Payment Successful');
+  });
+
+  it('FAILED / CREDIT_FAILED says the credit failed and the debit was reversed', () => {
+    const r = resolutionOf('FAILED', 'CREDIT_FAILED');
+    expect(r?.final).toBe(true);
+    expect(r?.outcome).toBe('declined');
+    expect(r?.title).toBe('Payment Failed');
+    expect(r?.message).toBe(
+      "The credit to the merchant's bank failed and the customer's debit was reversed (CREDIT_FAILED)"
+    );
+  });
+
+  it('any other failure or decline carries its reason', () => {
+    expect(resolutionOf('FAILED', 'SYSTEM_MALFUNCTION')?.message).toBe(
+      'Transaction not completed (SYSTEM_MALFUNCTION)'
+    );
+    expect(resolutionOf('DECLINED', 'INSUFFICIENT_FUNDS')?.message).toBe(
+      'Transaction declined (INSUFFICIENT_FUNDS)'
+    );
+    expect(resolutionOf('DECLINED', null)?.message).toBe('Transaction declined');
+  });
+
+  it('RETRY reads as not sent', () => {
+    expect(resolutionOf('RETRY', 'UNABLE_TO_LOCATE_RECORD')?.outcome).toBe('not_sent');
+  });
+
+  it('PENDING, nothing, or a status this app does not know changes nothing', () => {
+    expect(resolutionOf('PENDING', 'TRANSACTION_IN_PROCESS')).toBeNull();
+    expect(resolutionOf(null, null)).toBeNull();
+    expect(resolutionOf(undefined, undefined)).toBeNull();
+    expect(resolutionOf('SOMETHING_NEW', null)).toBeNull();
   });
 });

@@ -10,7 +10,7 @@ import {
   type MerchantReceipt,
   type MerchantTransaction,
 } from 'veyra-sdk-react-native';
-import { orderLookupText } from '../paymentResult';
+import { ACCEPTED_MERCHANT_MESSAGE, orderLookupText } from '../paymentResult';
 import { theme } from '../theme';
 import { QrTile, Busy, Button, Field, formatAmount, Section } from '../ui';
 
@@ -81,6 +81,8 @@ export function MerchantTransactionsScreen({
       }
       if (!fresh || fresh.status === 'PENDING') {
         setStatusNote('Still processing — the SDK will keep checking.');
+      } else if (fresh.status === 'ACCEPTED') {
+        setStatusNote('Accepted - still waiting for credit approval. The SDK will keep checking.');
       }
     } catch (e) {
       // Only a setup mistake rejects.
@@ -196,7 +198,9 @@ export function MerchantTransactionsScreen({
             has nothing left to ask and offering the action would imply its outcome might still
             change. It is the only route to an answer once the SDK's 30-day poll gives up.
           */}
-          {detail.status === 'PENDING' && (
+          {/* Accepted: debited, credit queued. Not final, so no receipt and no credit check yet. */}
+          {detail.status === 'ACCEPTED' && <Text style={styles.meta}>{ACCEPTED_MERCHANT_MESSAGE}</Text>}
+          {(detail.status === 'PENDING' || detail.status === 'ACCEPTED') && (
             <>
               <Button
                 title={checkingStatus ? 'Checking the payment status…' : 'Check status'}
@@ -293,6 +297,7 @@ export function MerchantTransactionsScreen({
             <Text style={styles.amount}>{formatAmount(t.amountMinorUnits)}</Text>
           </View>
           <Text style={styles.meta}>{t.transactionTime ?? ''}</Text>
+          {t.status === 'ACCEPTED' && <Text style={styles.meta}>{ACCEPTED_MERCHANT_MESSAGE}</Text>}
           <Button title="Details" onPress={() => setDetail(t)} />
           {t.status === 'APPROVED' && (
             <Button title="Receipt QR" onPress={() => showReceipt(t.merchantTransactionReference)} />

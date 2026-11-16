@@ -851,6 +851,8 @@ if (hash) {
       clearInterval(timer);
       onSettled(status === 'APPROVED');
     }
+    // Debited, credit queued: the QR is spent. Take it down, say "payment accepted", keep asking.
+    if (status === 'ACCEPTED') onAccepted();
     // PENDING (the QR's own row exists from the moment it is shown), RETRY, or no row yet: keep the QR up
   }, 3000);
   // clear the timer on expiry (onExpired) and when the screen unmounts
@@ -930,6 +932,12 @@ final; `'NOT_SENT'` means nothing was paid — refused on the phone (`ONLINE_REQ
 already-used handle (`INVALID_REQUEST`) — so fix the reason and pay again; anything else —
 `'PENDING'` — is pending.
 
+`'ACCEPTED'` is not a refusal either: the customer was debited and the credit to the merchant's bank
+is queued. Show "Payment accepted - waiting for credit approval" (the outcome's `message`) and don't
+pay again; `approved` is `false`, and the final status (`'APPROVED'`, or `'FAILED'` / `CREDIT_FAILED`
+when the credit fails and the debit is reversed) arrives on the history row and through
+`wallet.observeTransactionResolved` (§7.4 describes the status).
+
 An approved `PaymentOutcome` also carries `creditTransactionId` (the merchant-bank credit's
 identifier, for support) and `isCreditConfirmationSupported` (whether the merchant's bank can
 confirm the credit at all). Both are settlement news — never the payment's outcome; the credit
@@ -940,7 +948,7 @@ line itself lives on the history row (§6.6).
 | Call | What it does | Resolves with |
 |---|---|---|
 | `wallet.getTransactions(ref, limit = 50)` | A token's payments, most recent first, as the SDK last recorded them. On the phone | `TransactionSummary[]` |
-| `wallet.reconcilePendingTransactions()` | Asks the backend about **every** `PENDING` row on the device — on an occasion, never on a loop | `ReconcileResult` |
+| `wallet.reconcilePendingTransactions()` | Asks the backend about **every** `PENDING` or `ACCEPTED` row on the device — on an occasion, never on a loop | `ReconcileResult` |
 | `wallet.refreshTransactionStatus(transactionHash)` | Asks about **one** payment now and returns its updated row | `VeyraLookup<TransactionSummary>` |
 | `wallet.refreshCreditConfirmation(transactionHash)` | Asks now whether the merchant's bank received the funds for one approved payment | `VeyraLookup<TransactionSummary>` |
 | `wallet.processReceipt(qrPayload, expectedHash?)` | Verifies and stores a scanned merchant receipt QR, on the phone | `ReceiptScan` |
@@ -999,7 +1007,7 @@ generated-QR rows learn it from the status poll, so `null` on a still-open row m
 learned yet", not "no order id". For display and reconciliation — receipts and status
 refreshes key off `transactionHash` / `merchantTransactionReference`.
 
-**How the SDK waits for a `PENDING` row** (wallet and merchant alike). You do not have to
+**How the SDK waits for a `PENDING` or `ACCEPTED` row** (wallet and merchant alike). You do not have to
 poll, schedule anything, or keep a screen open — the native SDK under the bridge asks on its
 own with **exponential backoff**: the first re-checks come within seconds (most payments
 settle at once) and the interval doubles to a steady state of roughly **once an hour**. It
@@ -1008,7 +1016,7 @@ keeps that up for **30 days** from the transaction date, then stops asking.
 **Stopping is not an outcome.** At 30 days the row keeps whatever status it has — still
 `'PENDING'`, which is still true — and simply leaves the poll list. The SDK never writes
 `'FAILED'`, `'DECLINED'` or any verdict of its own; only the backend decides what a payment
-was. Treat a long-`'PENDING'` row as *unresolved*, not failed, however old it is.
+was. The same holds for an `'ACCEPTED'` row. Treat a long-`'PENDING'` row as *unresolved*, not failed, however old it is.
 
 **Let the user ask on demand — `refreshTransactionStatus`.** The SDK polls a pending
 transaction for you with **exponential backoff**, and **stops after 30 days**. Polling never
@@ -1032,10 +1040,10 @@ The per-transaction counterpart to `reconcilePendingTransactions()` (wallet) and
 same local store the background sweep writes, so an on-demand check and a background check
 can never disagree.
 
-- **Show it only while the row is `'PENDING'`.** A settled row has nothing to ask, and
+- **Show it only while the row is `'PENDING'` or `'ACCEPTED'`.** A settled row has nothing to ask, and
   offering the action implies the outcome might still change.
 - **It works past the 30-day window**, and on a row the sweep never had on its list.
-- **It is not a way to force an outcome.** A still-unsettled payment answers `'PENDING'`
+- **It is not a way to force an outcome.** A still-unsettled payment answers `'PENDING'` (or `'ACCEPTED'`)
   again — show a brief "still processing" note rather than retrying in a loop.
 - **A lookup that fails changes nothing** — it resolves with `failureReason`
   (`'NO_NETWORK_CONNECTION'` when the device is offline, `'SDK_UNABLE_TO_CONNECT'`,
@@ -1132,7 +1140,7 @@ const { value, failureReason } = await wallet.refreshCreditConfirmation(tx.trans
 | Call | What it does | Calls back with |
 |---|---|---|
 | `wallet.observeTokenStatusChanged(listener)` / `wallet.stopObservingTokenStatusChanged()` | The issuer changed a token's status — suspended, reactivated, expired, deactivated | `TokenStatusChangedEvent` |
-| `wallet.observeTransactionResolved(listener)` / `wallet.stopObservingTransactionResolved()` | A wallet payment left `PENDING` reached its final outcome, keyed on `transactionHash` | `WalletTransactionResolvedEvent` |
+| `wallet.observeTransactionResolved(listener)` / `wallet.stopObservingTransactionResolved()` | A wallet payment left `PENDING` or `ACCEPTED` reached its final outcome, keyed on `transactionHash`; also once, with `status` `'ACCEPTED'`, when a payment becomes accepted (not final) | `WalletTransactionResolvedEvent` |
 | `wallet.observeTokenKeyStateChanged(listener)` / `wallet.stopObservingTokenKeyStateChanged()` | A token ran out of payment keys, or a refresh replenished them | `TokenKeyStateEvent` |
 | `wallet.observePaymentRefusals(ref, listener)` / `wallet.stopObservingPaymentRefusals(ref)` | A payment with that token was refused before anything was sent | `WalletPaymentRefusal` |
 
@@ -1291,7 +1299,7 @@ talks to the card after `cardReadingComplete` — that is the moment to tell the
 tap is over, while the bank is still being contacted.
 
 **Branch on `result.responseStatus`, then `result.responseStatusReason` — never on
-`result.responseCode`.** `'APPROVED'`, `'DECLINED'`, `'FAILED'` and `'RETRY'` are final; `'PENDING'` means
+`result.responseCode`.** `'APPROVED'`, `'DECLINED'`, `'FAILED'` and `'RETRY'` are final; `'ACCEPTED'` means the customer was debited and the credit to the merchant's bank is queued: not final, so don't release goods yet, show no receipt, and never charge again ([An `ACCEPTED` payment](#an-accepted-payment-the-customer-is-debited-the-credit-is-still-to-come)); `'PENDING'` means
 the outcome is not known yet — do **not** re-charge; the SDK polls the sale and
 `softpos.observeTransactionResolved` fires when it settles (§7.7). `'NOT_SENT'` means the payment
 never reached the gateway; `'RETRY'` means it reached Veyra but was never sent to the bank. Both
@@ -1325,6 +1333,7 @@ This sample sends every rail (tap, both QR rails, and the wallet's scan-to-pay) 
 | Approved (`responseStatus: 'APPROVED'`) | yes | recorded and final |
 | Declined / failed (`'DECLINED'` / `'FAILED'`) | yes | the gateway recorded the attempt |
 | Duplicate order (`'FAILED'` / `DUPLICATE_MERCHANT_ORDER_ID`) | **no** | this attempt was refused; the order belongs to the original payment — say paid vs still confirming (§7.3) |
+| Accepted (`'ACCEPTED'`) | **no** | not final — the customer was debited and the credit is queued; the screen holds until the payment is approved or fails |
 | Pending (`'PENDING'`) | **no** | not final — the status can still change |
 | Not sent to the bank (`'RETRY'`) | **no** | recorded in history, but no payment was made, so there is nothing to print |
 | Never sent (`'NOT_SENT'`) | **no** | nothing was recorded to print |
@@ -1369,6 +1378,8 @@ taps toward your launcher activity and away from the session.
   the `onExpired` parameter does on Android and iOS. When the customer's payment ends `RETRY` (Veyra did not send it to the
   bank), the QR goes back to `PENDING` and stays payable until it expires — keep polling; the
   customer can pay it again. Once it has expired, create a new QR for the **same** order id.
+  **An accepted push does not settle the QR.** When the customer's bank debits them and queues the credit,
+  the context stays unsettled while the SDK writes `ACCEPTED` onto the sale's stored row. Read the row (`softpos.getTransaction(txRef)`) in the same poll; when its status is `ACCEPTED`, take the QR down and show "payment accepted" — see [An `ACCEPTED` payment](#an-accepted-payment-the-customer-is-debited-the-credit-is-still-to-come).
 - **Charge a customer QR (consumer-presented):** `inspectCustomerQr(payload)` →
   `CustomerQrInspection`. `'APPROVED'` carries `qr` (`{ handle, maskedCard, amountMinorUnits,
   currencyCode, cardholderName }` — `currencyCode` is ISO 4217 numeric, three digits, e.g. `'566'`) — confirm its amount on screen. A payload that is not a
@@ -1379,7 +1390,7 @@ taps toward your launcher activity and away from the session.
   triple: **branch on `responseStatus`**, like a tap. `approved` is `true` only when
   `responseStatus === 'APPROVED'`; it is `false` for a pending payment too, so never read
   `approved: false` as a decline. `'PENDING'` (`68`, `06`, `96`…) is unresolved — never re-charge
-  it; an unknown or already-used handle is `'NOT_SENT'` / `INVALID_REQUEST`.
+  it; `'ACCEPTED'` (`09`) means the customer was debited and the credit is queued — not final, never re-charge; an unknown or already-used handle is `'NOT_SENT'` / `INVALID_REQUEST`.
 
 ```ts
 const qr = await softpos.createPaymentContext(minorUnits, undefined, orderIdForAttempt());
@@ -1404,7 +1415,7 @@ if (qr.responseStatus === 'APPROVED' && qr.txRef && qr.mpmPayload) {
 > **your** order / basket / invoice id, echoed back. An order can have **several attempts** — one
 > payment per try — and its order id can be used again **until the order is paid or possibly
 > paid**: a new attempt is refused `94` / `FAILED` / `DUPLICATE_MERCHANT_ORDER_ID` (with the
-> attempt holding the order as `originalPayment`) only while the order is `APPROVED` or `PENDING`,
+> attempt holding the order as `originalPayment`) only while the order is `APPROVED`, `ACCEPTED` or `PENDING`,
 > and `createPaymentContext` answers `FAILED` / `DUPLICATE_MERCHANT_ORDER_ID` without creating a QR
 > in the same case. Several QRs may share one order id. **Every merchant-initiated rail requires it**: `tap.start`
 > (`TapRequest.merchantOrderId`), `createPaymentContext(amountMinorUnits, currency | undefined, merchantOrderId)`
@@ -1415,18 +1426,18 @@ if (qr.responseStatus === 'APPROVED' && qr.txRef && qr.mpmPayload) {
 >
 > **Which order id for the next attempt** (the retry rule, §9.3): after `'NOT_SENT'` or `'RETRY'`
 > nothing was charged — retry with the **same** one. After `'DECLINED'` or `'FAILED'` the same order
-> may be tried again too (another card after a decline). After `'APPROVED'` or `'PENDING'` the
+> may be tried again too (another card after a decline). After `'APPROVED'`, `'ACCEPTED'` or `'PENDING'` the
 > order is paid or may be — never take another payment for it.
 
 **A duplicate order carries the original payment.** The refusal — on `TapResult`,
 `CustomerQrChargeOutcome` and `PaymentContextQr` alike — carries `originalPayment: OriginalPayment
-| null`, the attempt that decides the order's status (the approved one, otherwise the pending one —
+| null`, the attempt that decides the order's status (the approved one, otherwise the accepted one, otherwise the pending one —
 §9.3):
 
 ```ts
 interface OriginalPayment {
   responseCode: string | null;          // the original's wire code, e.g. '00' — receipts/support only
-  responseStatus: string | null;        // 'APPROVED' (already paid) / 'PENDING' (still being confirmed)
+  responseStatus: string | null;        // 'APPROVED' (already paid) / 'ACCEPTED' (debited, waiting for approval) / 'PENDING' (still being confirmed)
   responseStatusReason: string | null;
   amountMinorUnits: number | null;
   merchantTransactionReference: string | null;
@@ -1435,13 +1446,19 @@ interface OriginalPayment {
 ```
 
 Tell the merchant which, and **never offer a retry** — the order is paid, or a payment for it is
-still being confirmed. The sample (`src/paymentResult.ts`) uses exactly two sentences:
+accepted or still being confirmed. The sample (`src/paymentResult.ts`) uses one sentence for each:
 
 ```ts
 export function duplicateOrderMessage(original: OriginalPayment | null | undefined): string {
-  return original?.responseStatus === 'PENDING'
-    ? 'A payment for this order is still being confirmed - do not take another payment'
-    : 'This order is already paid - do not take another payment';
+  switch (original?.responseStatus) {
+    case 'PENDING':
+      return 'A payment for this order is still being confirmed - do not take another payment';
+    case 'ACCEPTED':
+      // The customer was debited and the credit is queued: not paid yet, and never retried.
+      return 'A payment for this order is accepted and waiting for approval - do not take another payment';
+    default:
+      return 'This order is already paid - do not take another payment';
+  }
 }
 ```
 
@@ -1616,6 +1633,76 @@ nothing. How long a result stays up and what dismisses it are app concerns end t
 SDK has no concept of a screen and supplies no duration, and dismissing a screen never stops
 its app-scoped credit polling.
 
+#### An `ACCEPTED` payment: the customer is debited, the credit is still to come
+
+Some banks answer a transfer before the money has reached the merchant. They debit the customer,
+queue the credit to the merchant's bank, and say so. The payment then comes back with
+`responseCode` `09`, `responseStatus` `'ACCEPTED'` and `responseStatusReason` `ACCEPTED`.
+
+**`ACCEPTED` is not final.** It says more than `PENDING` does (the debit is done; only the credit is
+outstanding), but the sale is not complete until the payment is `APPROVED`.
+
+- **Where you see it.** On every payment result: the card tap (`softpos.tap.start`), `chargeCustomerQr`, a merchant
+  QR (below) and the wallet's `wallet.payScannedContext` (`approved` is `false`). Also on history rows
+  (`MerchantTransaction.status`, the wallet's `authorizationStatus`), `paymentStatus(merchantOrderId)`
+  and `refreshTransactionStatus`.
+- **The SDK keeps checking.** It stores the payment and polls it on the same schedule as a `PENDING`
+  one, for up to 30 days. You don't poll.
+- **What it becomes.** `APPROVED` (`00`) when the credit goes through, or `FAILED` with reason
+  `CREDIT_FAILED` (code `22`) when the credit fails: the customer's debit was reversed, so no money was
+  kept.
+- **Merchant app.** Show "Payment accepted - customer debited. Wait for approval before releasing
+  goods" (the SDK's `message`). **Do not release goods until the payment is `APPROVED`.**
+- **Wallet app.** Show "Payment accepted - waiting for credit approval". The customer must not pay
+  again.
+- **No receipt, no credit confirmation.** Hide "View receipt" until the payment is final. Credit
+  confirmation starts after `APPROVED`, as it always does.
+- **The merchant order ID is held**, exactly as by a `PENDING` payment. Another payment for the order
+  is refused `94` / `FAILED` / `DUPLICATE_MERCHANT_ORDER_ID`, and its `originalPayment.responseStatus`
+  is `ACCEPTED`. Never take another payment for the order.
+- **Check status.** Offer `refreshTransactionStatus` on an accepted row, as you do for a pending one.
+
+**You are told twice.** `observeTransactionResolved`, on the SoftPOS and on the wallet, fires once
+with `status` `'ACCEPTED'` and again with the final status. Keep your waiting state on the first one.
+Before this status existed the observer fired only on a final status, so an observer that treats
+every event as final must now check for `'ACCEPTED'`.
+
+```ts
+// Any merchant rail: the tap's result, chargeCustomerQr, or a merchant QR (below).
+if (result.responseStatus === 'ACCEPTED') {
+  // Debited, credit queued. Not final: no receipt, no credit confirmation, no retry.
+  showAccepted(result.message);            // "Payment accepted - customer debited. Wait for approval…"
+  waitingFor = result.merchantTransactionReference;
+}
+
+const sub = softpos.observeTransactionResolved((e) => {
+  if (e.merchantTransactionReference !== waitingFor) return;
+  if (e.status === 'ACCEPTED') showAccepted(null);            // fires once: still waiting
+  else if (e.status === 'APPROVED') showApproved(waitingFor); // release goods; receipt and credit confirmation apply now
+  else showNotCompleted(e.reason);                            // FAILED / CREDIT_FAILED: the debit was reversed
+});
+
+// Merchant QR: in your contextStatus poll, while the context is not settled
+const row = await softpos.getTransaction(txRef);
+if (row?.status === 'ACCEPTED') {
+  hideQr();                                // it can no longer be paid
+  showAccepted(null);
+}
+```
+
+**A merchant QR.** While the customer's push is only accepted the context is not settled: `isSettled`
+stays `false`, and the QR can no longer be paid. The SDK writes `ACCEPTED` onto the stored row, so read
+the row (`softpos.getTransaction(reference)`) while you poll, take the QR down, and show the accepted state.
+
+**`TRANSACTION_IN_PROCESS_ESCALATED`** can replace the reason on an accepted payment that automated
+reconciliation has handed to a person. The status stays `ACCEPTED`: keep showing it as accepted, tell
+the merchant "we're looking into this", and re-check lazily.
+
+**Keep your default branch.** Code that does not name `ACCEPTED` must fall into the branch for a
+status it doesn't know: unresolved, never a refusal, and never a retry.
+
+The sample does this in `src/paymentResult.ts` (`acceptedToParams`, `resolutionOf`) and `PaymentResultScreen`: every rail lands on the same accepted result, which holds (no auto-return), hides **View Receipt**, reads the stored row on mount, listens to `observeTransactionResolved`, and shows `APPROVED` or the failure in place. The wallet shows the accepted state on the same result screen and on the shown QR in `ShowToPayScreen`.
+
 #### Holding a `PENDING` payment, and being told when it settles
 
 Because the SDK no longer invents terminal outcomes, a tap that gets no answer hands you
@@ -1668,6 +1755,7 @@ charging twice.
 | `DECLINED` | No — the issuer or bank refused | Allowed — another card or method, the **same** order ID |
 | `FAILED` | No | Allowed — fix the reason, the **same** order ID (not after `94`, below) |
 | `PENDING` | Maybe | **Refused** — `94` / `FAILED` / `DUPLICATE_MERCHANT_ORDER_ID`, with `originalPayment`. Don't take another payment; wait for the SDK to resolve it |
+| `ACCEPTED` | Yes — the customer was debited; the credit to the merchant's bank is queued | **Refused** the same way. Don't take another payment, and don't release goods until it is `APPROVED` |
 | `APPROVED` | Yes — the order is paid | **Refused** the same way. Don't take another payment; a new sale gets a new order ID |
 
 Keep the order ID for the life of the sale and drop it only when the order is paid or might be —
@@ -1680,7 +1768,7 @@ let saleOrderId: string | null = null;          // your POS order id for the sal
 
 const orderIdForAttempt = () => (saleOrderId ??= newOrderIdFromYourPos());
 
-/** No money moved: the retry keeps the SAME order id. APPROVED, PENDING or a status this app
+/** No money moved: the retry keeps the SAME order id. APPROVED, ACCEPTED, PENDING or a status this app
  *  doesn't know (treat it as pending): the order is paid or may be — never pay it again. */
 const keepsOrderId = (s: ResponseStatus | null | undefined) =>
   s === 'NOT_SENT' || s === 'RETRY' || s === 'DECLINED' || s === 'FAILED';
@@ -1693,8 +1781,8 @@ async function charge(handle: string) {
 ```
 
 The gateway enforces the rule, so reusing an order ID is always safe: the worst case is a `94`
-whose `originalPayment` tells you the order is already paid (`APPROVED`) or still being confirmed
-(`PENDING`). The full rule, with the order-status precedence behind it, is in §9.3.
+whose `originalPayment` tells you the order is already paid (`APPROVED`), debited and waiting for
+approval (`ACCEPTED`) or still being confirmed (`PENDING`). The full rule, with the order-status precedence behind it, is in §9.3.
 
 ### 7.6 Looking up a payment
 
@@ -1709,13 +1797,14 @@ const order = lookup.value;                              // what is known — fr
 if (!order) return showNothingKnown();                   // no record here, and the gateway was not asked
 switch (order.responseStatus) {
   case 'APPROVED': return showPaid(order);               // never take another payment
+  case 'ACCEPTED': return showAccepted(order);           // debited; wait for APPROVED, never retry
   case 'PENDING': return showStillConfirming(order);     // never retry; the SDK resolves it
   default: return offerPayment(orderId);                 // DECLINED / FAILED / RETRY: same order id
 }
 ```
 
 **When to use it.** Whenever you hold an order ID but not a settled outcome: a payment that ended
-`PENDING`, or your app restarting (or the JS bundle reloading) before the result arrived. It covers
+`PENDING` or `ACCEPTED`, or your app restarting (or the JS bundle reloading) before the result arrived. It covers
 the card tap, the merchant QR (`createPaymentContext`) and the customer-QR charge — the same order
 ID, whichever rail was used, so your POS never needs to remember the rail.
 
@@ -1725,13 +1814,14 @@ precedence over all its attempts (§9.3):
 | Rank | Rule | `responseStatus` | What to do |
 |---|---|---|---|
 | 1 | any attempt `APPROVED` | `'APPROVED'` | Paid. Never take another payment for it |
-| 2 | otherwise, any attempt `PENDING` | `'PENDING'` | It may have moved money. **Never retry**; the SDK keeps checking |
-| 3 | otherwise, the **latest** attempt | `'DECLINED'`, `'FAILED'` or `'RETRY'` | No money moved. Pay again with the **same** order ID |
-| 4 | no attempts | `'RETRY'`, `responseCode` `'25'`, reason `UNABLE_TO_LOCATE_RECORD` | Nothing was charged. Pay with the same order ID |
+| 2 | otherwise, any attempt `ACCEPTED` | `'ACCEPTED'` | The customer was debited and the credit is queued. **Never retry**, and wait for `APPROVED` before releasing goods; the SDK keeps checking |
+| 3 | otherwise, any attempt `PENDING` | `'PENDING'` | It may have moved money. **Never retry**; the SDK keeps checking |
+| 4 | otherwise, the **latest** attempt | `'DECLINED'`, `'FAILED'` or `'RETRY'` | No money moved. Pay again with the **same** order ID |
+| 5 | no attempts | `'RETRY'`, `responseCode` `'25'`, reason `UNABLE_TO_LOCATE_RECORD` | Nothing was charged. Pay with the same order ID |
 
 The other top-level fields — `responseStatusReason`, `responseCode`, `merchantTransactionReference`,
 `transactionId`, `amountMinorUnits` — are the **deciding attempt**'s (the approved one, else the
-pending one, else the latest). `attempts` lists every attempt, newest first (`OrderPaymentAttempt`:
+accepted one, else the pending one, else the latest). `attempts` lists every attempt, newest first (`OrderPaymentAttempt`:
 `merchantTransactionReference`, `transactionId`, `amountMinorUnits`, `responseCode`,
 `responseStatus`, `responseStatusReason`). `answeredBy` says who answered: `'DEVICE'` or
 `'GATEWAY'`.
@@ -1765,7 +1855,7 @@ wording comes from `orderLookupText` in `src/paymentResult.ts` (unit-tested).
 
 | Call | What it does | Returns |
 |---|---|---|
-| `observeTransactionResolved(listener: (e: TransactionResolvedEvent) => void)` · `stopObservingTransactionResolved()` | Fires once per pending sale when it settles — `APPROVED` / `DECLINED` / `FAILED` / `RETRY`, never `PENDING` — on any rail, including a sale from an earlier session (below). | `VeyraSubscription` (`.remove()`); stop: `void` |
+| `observeTransactionResolved(listener: (e: TransactionResolvedEvent) => void)` · `stopObservingTransactionResolved()` | Fires once per pending or accepted sale when it settles — `APPROVED` / `DECLINED` / `FAILED` / `RETRY`, never `PENDING` — and once before that, with `status` `'ACCEPTED'` (not final: keep waiting), when a payment becomes accepted. On any rail, including a sale from an earlier session (below). | `VeyraSubscription` (`.remove()`); stop: `void` |
 | `observeCreditConfirmation(listener: (e: CreditConfirmationEvent) => void)` · `stopObservingCreditConfirmation()` | Fires when a sale's funds are confirmed in the merchant's bank (`RECEIVED`), or once with the final 30-day `UNABLE_TO_CONFIRM` (§7.4). | `VeyraSubscription` (`.remove()`); stop: `void` |
 | `observeMerchantStatusChanged(listener: (e: MerchantStatusEvent) => void)` · `stopObservingMerchantStatusChanged()` | Fires when the stored merchant's backend status changes — activated, deactivated, suspended (§8.1). | `VeyraSubscription` (`.remove()`); stop: `void` |
 
@@ -1778,7 +1868,7 @@ import { softpos, type TransactionResolvedEvent } from 'veyra-sdk-react-native';
 
 const sub = softpos.observeTransactionResolved((r: TransactionResolvedEvent) => {
   // r.merchantTransactionReference — which payment
-  // r.status — 'APPROVED' / 'DECLINED' / 'FAILED' / 'RETRY' (never 'PENDING')
+  // r.status — 'APPROVED' / 'DECLINED' / 'FAILED' / 'RETRY', or 'ACCEPTED' once before it (not final; never 'PENDING')
   // r.reason — e.g. 'INSUFFICIENT_FUNDS'
   // r.responseCode — the wire literal, for receipts and support
 });
@@ -1824,7 +1914,7 @@ subscription ends just that one (calling it twice is harmless).
 | `wallet.observePaymentRefusals(tur, …)` | `requireOnline` / `amountExceedCardLimit` / `deviceNotBound`, **per card**, on every rail that platform has |
 | `softpos.tap.start(request, onEvent)` | `cardDetected` / `cardContactLost` / `unsupportedCard` / progress / `ended` / `result` (a `TapResult` with the triple — every attempt ends with one, `'NOT_SENT'` included; iOS `ended` is a reader session that closed without a card) |
 | `softpos.createPaymentContext(…, onExpired)` (the wallet passes `onExpired` to `showQrToPay`) | one `expired` per rendered QR |
-| `softpos.observeTransactionResolved` | one settlement per pending sale — `APPROVED` / `DECLINED` / `FAILED`, never `PENDING` (see §7.7) |
+| `softpos.observeTransactionResolved` | one settlement per pending or accepted sale — `APPROVED` / `DECLINED` / `FAILED` / `RETRY`, never `PENDING` — preceded by one `ACCEPTED` event (not final) when the payment was accepted first (see §7.7) |
 | `softpos.observeCreditConfirmation` | one terminal credit confirmation per sale — `RECEIVED`, or the final 30-day `UNABLE_TO_CONFIRM` (see §7.4) |
 | `wallet.observeTokenStatusChanged` | the issuer changed a card's status — suspended, reactivated, expired, deactivated (see §8.1) |
 | `wallet.observeTransactionResolved` | one settlement per pending **wallet** payment — the payer-side twin of `softpos.observeTransactionResolved`, keyed on `transactionHash` (see §8.1) |
@@ -2012,10 +2102,10 @@ is typed as a plain `string`.
 | Field | What it is | How to use it |
 |---|---|---|
 | `responseCode` | Payments: the two-digit code (`'00'`, `'51'`, `'68'`…). Add-card: the issuer's decision. Absent on other calls | Receipts, disputes, support. **Never branch on it** |
-| `responseStatus` | One of the six statuses below | **Branch on this first** |
+| `responseStatus` | One of the seven statuses below | **Branch on this first** |
 | `responseStatusReason` | The named cause (`'INSUFFICIENT_FUNDS'`, `'NO_NETWORK_CONNECTION'`…) | Branch on it second; always keep a default |
 
-#### The six statuses
+#### The seven statuses
 
 | `responseStatus` | What it means | Did the request reach Veyra? | Merchant order ID reusable? (payments) | What your app does |
 |---|---|---|---|---|
@@ -2023,6 +2113,7 @@ is typed as a plain `string`.
 | `'DECLINED'` | It was done, and someone with authority refused (issuer, bank, risk rules). No money moved | Yes | Yes | Show the reason. Don't retry automatically; the customer may try another card or method under the **same** order ID |
 | `'FAILED'` | It was not performed. On a payment, Veyra received it and retrying with the same reference won't help — mainly `94`, the order is already paid or possibly paid. On any call that is not a payment or a digitisation, it is also the answer when the request never reached Veyra (`NO_NETWORK_CONNECTION`, `INVALID_REQUEST`…) or was checked on the phone | Yes — or, on a non-payment call, maybe not (the reason says) | Yes, except after `94` | Fix what the reason names and try again. After `94`, take no further payment for the order |
 | `'PENDING'` | It may have been done; the outcome is not known yet | Maybe | **No** — it may be paid | **Never retry.** The SDK keeps checking and tells you when it's final |
+| `'ACCEPTED'` | **Payments only.** The customer was debited and the credit to the merchant's bank is queued. **Not final** | Yes | **No** — the customer was debited | **Never retry, and don't release goods yet.** Show "payment accepted". The SDK keeps checking and tells you when it becomes `'APPROVED'`, or `'FAILED'` / `CREDIT_FAILED` (the credit failed and the debit was reversed). No receipt and no credit confirmation until then |
 | `'RETRY'` | It reached Veyra, but the debit was never requested. Nothing was charged | Yes | **Yes** | Fix what the reason names, then retry with the **same** order ID |
 | `'NOT_SENT'` | A payment or a digitisation that never reached Veyra (the phone stopped it). Nothing was done. Only those calls answer it | No | **Yes** | Fix what the reason names (connect, authenticate, …), then retry with the **same** order ID |
 
@@ -2033,9 +2124,10 @@ before the bank was asked (it carries Veyra's `responseCode` and reason, and the
 recorded in the merchant's history). On screen, the sample uses one sentence for `RETRY`:
 "Payment not sent to the bank - retry with the same order ID".
 
-`PENDING` is now the **only** status where the outcome is unknown.
+`PENDING` is the **only** status where the outcome is unknown. `ACCEPTED` is known, and not final:
+the customer was debited and only the credit to the merchant's bank is outstanding.
 
-Seven rules follow from this table:
+Eight rules follow from this table:
 
 - **`NOT_SENT` is only for payments and digitisation.** The card tap, `chargeCustomerQr`,
   `createPaymentContext`, `payScannedContext`, `showQrToPay` and `digitise` may answer it — it tells
@@ -2046,6 +2138,10 @@ Seven rules follow from this table:
   never `NOT_SENT`.
 - **`NOT_SENT` never has a `responseCode`.** A code only ever means something on the network
   answered, or failed to.
+- **`ACCEPTED` is not final, and it is not `PENDING`.** The customer was debited and the credit to the
+  merchant's bank is queued. Show it as accepted, never as approved and never as failed; a merchant
+  waits for `APPROVED` before releasing goods. See
+  [An `ACCEPTED` payment](#an-accepted-payment-the-customer-is-debited-the-credit-is-still-to-come).
 - **`PENDING` is never a failure.** Never show it as failed and never charge again. Show "We're
   checking this payment" and wait for the SDK's update (`softpos.observeTransactionResolved` /
   `wallet.observeTransactionResolved`, §7.7 and §8.1).
@@ -2061,7 +2157,7 @@ Seven rules follow from this table:
   (§9.4).
 - **A merchant order ID can be used again until the order is paid or possibly paid.** A new
   attempt is refused `94` / `FAILED` / `DUPLICATE_MERCHANT_ORDER_ID` only while the order is
-  `APPROVED` or `PENDING`, and the refusal carries the attempt holding the order as
+  `APPROVED`, `ACCEPTED` or `PENDING`, and the refusal carries the attempt holding the order as
   `originalPayment` (§7.3): tell the merchant whether the order is already paid or still being
   confirmed, and **don't take another payment for it** — never offer a retry. After `DECLINED`,
   `FAILED`, `RETRY` or `NOT_SENT`, the same order ID is accepted (§9.3).
@@ -2123,6 +2219,9 @@ await softpos.tap.start({ amountMinorUnits, merchantOrderId: orderIdForAttempt()
         case 'MODE_REFUSED': return showNotSent('Finish the other payment first');
         default: return showNotSent(r.message);          // retry keeps the same order id
       }
+    case 'ACCEPTED':
+      // Debited, credit queued: not final. No receipt, no retry; wait for APPROVED.
+      return showAccepted(r.message);
     default:
       // PENDING, or a status newer than this build: unresolved. Never retry — the SDK resolves
       // it and softpos.observeTransactionResolved tells you.
@@ -2150,6 +2249,9 @@ switch (outcome.responseStatus) {
   case 'DECLINED':
   case 'FAILED':
     showProblem(outcome.message);
+    break;
+  case 'ACCEPTED': // debited; the credit to the merchant's bank is queued — not final, never pay again
+    showAccepted(outcome.message);
     break;
   default: // PENDING, or a status added later — never "failed", never pay again
     showChecking(outcome);
@@ -2190,7 +2292,7 @@ function onTapEvent(e: TapEvent) {
       return;
     case 'APPROVED':   // second attempt: 00 / APPROVED — the order is paid
       return showApproved(r.merchantTransactionReference);
-    // …DECLINED, FAILED and PENDING as in the example above
+    // …DECLINED, FAILED, ACCEPTED and PENDING as in the example above
   }
 }
 ```
@@ -2213,12 +2315,12 @@ means the call has no response code by design.
 | `softpos.getTransactions()` / `getTransaction(ref)` | `MerchantTransaction` | `responseCode` | `status` | `responseStatusReason` |
 | `softpos.refreshTransactionStatus(ref)` / `refreshCreditConfirmation(ref)` | `VeyraLookup<MerchantTransaction>` | on `value` | on `value` | `failureReason` when the check could not be made |
 | `softpos.paymentStatus(merchantOrderId)` (**look up an order**) | `VeyraLookup<OrderPaymentStatus>` | `value.responseCode` (the deciding attempt's) | `value.responseStatus` (the **order's**) | `value.responseStatusReason`; `failureReason` when the gateway could not be asked |
-| `softpos.observeTransactionResolved` | `TransactionResolvedEvent` | `responseCode` | `status` (never `'PENDING'`) | `reason` |
+| `softpos.observeTransactionResolved` | `TransactionResolvedEvent` | `responseCode` | `status` (never `'PENDING'`; `'ACCEPTED'` once, then the final status) | `reason` |
 | `wallet.payScannedContext(handle)` (**scan-to-pay**) | `PaymentOutcome` | `responseCode` | `responseStatus` | `responseStatusReason` |
 | `wallet.showQrToPay(amount)` | `PaymentQr` | — | `responseStatus` (`APPROVED` / `NOT_SENT`) | `responseStatusReason` |
 | `wallet.getTransactions(...)` | `TransactionSummary` | `responseCode` | `authorizationStatus` | `responseStatusReason` |
 | `wallet.refreshTransactionStatus(hash)` / `refreshCreditConfirmation(hash)` | `VeyraLookup<TransactionSummary>` | on `value` | on `value` | `failureReason` when the check could not be made |
-| `wallet.observeTransactionResolved` | `WalletTransactionResolvedEvent` | `responseCode` | `status` (never `'PENDING'`) | `reason` |
+| `wallet.observeTransactionResolved` | `WalletTransactionResolvedEvent` | `responseCode` | `status` (never `'PENDING'`; `'ACCEPTED'` once, then the final status) | `reason` |
 | `wallet.digitise(...)` | `DigitiseResult` | add-card decision (`'APPROVED'` / `'APPROVE_REQUIRE_AUTH'` / `'DECLINED'`) | `responseStatus` | `responseStatusReason` |
 | `wallet.verifyAccount(...)` | `VerifyAccountResponse` | issuer decision | `responseStatus` | `responseStatusReason` |
 | `wallet.getBanks(...)` | `BankList` | — | `responseStatus` | `responseStatusReason` |
@@ -2335,7 +2437,7 @@ digitisation; any other call answers `FAILED` / `SDK_UNABLE_TO_CONNECT`).
 
 The triple is not payment-only. Every Veyra service the SDK talks to — the Veyra payment gateway,
 the Veyra token service, and through them the switch and the issuer's gateway — answers with the
-same fields: `responseStatus` (`APPROVED` / `DECLINED` / `FAILED` / `PENDING`, and on payments
+same fields: `responseStatus` (`APPROVED` / `DECLINED` / `FAILED` / `PENDING`, and on payments `ACCEPTED` and
 `RETRY`) and `responseStatusReason`, plus a human `message`. **Payments** also carry `responseCode`, an
 ISO 8583-style code. **Add-card** carries its own decision in `responseCode`: `'APPROVED'`,
 `'APPROVE_REQUIRE_AUTH'` or `'DECLINED'` (not an ISO number). Other non-payment calls carry no
@@ -2362,6 +2464,9 @@ every status lookup. One code always means one reason.
 | `65` | `DECLINED` | `VELOCITY_LIMIT_EXCEEDED` | too many payments in a short time | try later |
 | `09` | `PENDING` | `TRANSACTION_IN_PROCESS` | still being processed | wait |
 | `09` | `PENDING` | `TRANSACTION_IN_PROCESS_ESCALATED` | a person is reconciling it | show "we're looking into this"; the SDK re-checks less often |
+| `09` | `ACCEPTED` | `ACCEPTED` | The bank debited the customer and queued the credit to the merchant's bank. **Not final** | Show "payment accepted"; a merchant waits for `APPROVED` before releasing goods. No receipt or credit confirmation yet; never take another payment for the order. The SDK keeps checking |
+| `09` | `ACCEPTED` | `TRANSACTION_IN_PROCESS_ESCALATED` | An accepted payment that a person is now reconciling. Still accepted, still not final | Show "we're looking into this"; the SDK re-checks less often |
+| `22` | `FAILED` | `CREDIT_FAILED` | An accepted payment's credit to the merchant's bank failed, and the customer's debit was reversed | Say the payment did not complete. No money was kept; the order can be paid again with the same order ID |
 | `68` | `PENDING` | `NO_RESPONSE_RECEIVED` | a hop timed out | wait |
 | `06` | `PENDING` | `UPSTREAM_ERROR` | a hop answered with an error | wait |
 | `96` | `PENDING` | `SYSTEM_MALFUNCTION` | the Veyra payment gateway hit an internal error while processing | wait; the SDK resolves it |
@@ -2534,6 +2639,7 @@ paid or possibly paid** — that is what stops a double charge.
 | `DECLINED` | Not automatically; another card or method is the customer's choice | The **same** one is accepted |
 | `FAILED` | Only after fixing what the reason names — **never** for `DUPLICATE_MERCHANT_ORDER_ID` (the order is paid or still being confirmed) | The **same** one is accepted, except after `94` |
 | `PENDING` | **Never** — wait for the SDK to resolve it | — (a new attempt is refused `94`) |
+| `ACCEPTED` | **Never** — the customer was debited. Wait for the SDK to report `APPROVED` or `FAILED` | — (a new attempt is refused `94`) |
 | `APPROVED` | — the order is paid | — (a new attempt is refused `94`); a new sale gets a new one |
 
 **How Veyra decides what state an order is in.** With several attempts per order, "the latest
@@ -2543,11 +2649,12 @@ been. Veyra applies one precedence rule over all of an order's attempts:
 | Rank | Rule | The order is… |
 |---|---|---|
 | 1 | any attempt `APPROVED` | **`APPROVED`** — paid |
-| 2 | otherwise, any attempt `PENDING` (including one still in flight) | **`PENDING`** — may be paid |
-| 3 | otherwise, the **latest** attempt | its status: `DECLINED`, `FAILED` or `RETRY` (card A declined, then card B ended `RETRY` → the order reads `RETRY`) |
-| 4 | no attempts | `RETRY` / `25` / `UNABLE_TO_LOCATE_RECORD` — nothing was debited; the order can be paid |
+| 2 | otherwise, any attempt `ACCEPTED` | **`ACCEPTED`** — debited; waiting for the credit to be approved |
+| 3 | otherwise, any attempt `PENDING` (including one still in flight) | **`PENDING`** — may be paid |
+| 4 | otherwise, the **latest** attempt | its status: `DECLINED`, `FAILED` or `RETRY` (card A declined, then card B ended `RETRY` → the order reads `RETRY`) |
+| 5 | no attempts | `RETRY` / `25` / `UNABLE_TO_LOCATE_RECORD` — nothing was debited; the order can be paid |
 
-The attempt that sets the order's status (the approved one, else the pending one, else the latest)
+The attempt that sets the order's status (the approved one, else the accepted one, else the pending one, else the latest)
 is the **deciding attempt**. The same rule decides whether a new attempt is accepted (refused `94`
 at ranks 1 and 2, accepted at 3 and 4) and which attempt a `94` refusal carries as
 `originalPayment`. If you show an order's status from your merchant history (§7.4), where each
@@ -2561,7 +2668,7 @@ fix the reason and try again. The
 sample's `GetPaidScreen` keeps the order ID after a `NOT_SENT`, `RETRY`, `DECLINED` or `FAILED`
 outcome (`orderIdForAttempt()` reuses it, `attemptEnded(status)` keeps or drops it via
 `keepsOrderId`) on all three merchant rails (tap, softpos QR, customer QR), and drops it after
-`APPROVED`, `PENDING` or a status it doesn't know; see the code in §9.2 and §7.5.
+`APPROVED`, `ACCEPTED`, `PENDING` or a status it doesn't know; see the code in §9.2 and §7.5.
 
 ### 9.4 Reads — `VeyraLookup<T>`
 
@@ -2599,6 +2706,8 @@ if (failureReason) {
   showNote(message ?? failureReason);       // e.g. offline — the row is unchanged, still pending
 } else if (value?.status === 'PENDING') {
   showNote('Still processing');             // asked; not settled yet — don't loop
+} else if (value?.status === 'ACCEPTED') {
+  showNote('Still accepted - waiting for approval');
 } else if (value) {
   showRow(value);                           // settled: APPROVED / DECLINED / FAILED
 }
@@ -2743,7 +2852,7 @@ transaction-resolved events (`wallet.observeTransactionResolved`, `softpos.obser
 **The merchant order ID and `RETRY`:**
 
 - **The order ID is no longer single-use.** An order can have several attempts, and the same order
-  ID is accepted until the order is `APPROVED` or `PENDING`; only then is a new attempt refused
+  ID is accepted until the order is `APPROVED`, `ACCEPTED` or `PENDING`; only then is a new attempt refused
   `94` / `FAILED` / `DUPLICATE_MERCHANT_ORDER_ID`, carrying the deciding attempt as
   `originalPayment` (§9.3). After `DECLINED`, `FAILED`, `RETRY` or `NOT_SENT`, retry under the
   same order ID. Drop any code that mints a new order ID because an attempt "used it up".
@@ -2782,7 +2891,7 @@ The new and changed result types, condensed from the package's TypeScript defini
 carry the full documentation for every field):
 
 ```ts
-type ResponseStatus = 'APPROVED' | 'DECLINED' | 'FAILED' | 'PENDING' | 'RETRY' | 'NOT_SENT' | (string & {});
+type ResponseStatus = 'APPROVED' | 'ACCEPTED' | 'DECLINED' | 'FAILED' | 'PENDING' | 'RETRY' | 'NOT_SENT' | (string & {});
 
 type CancelResult =                     // the answer to a cancel — never a call's status (§9.8)
   | 'CANCELLED' | 'TOO_LATE_TO_CANCEL_REQUEST_ALREADY_SENT' | 'TOO_LATE_TO_CANCEL_TASK_ALREADY_PROCESSED'
@@ -2859,7 +2968,7 @@ interface CustomerQrChargeOutcome {
 }
 interface OrderPaymentStatus {          // softpos.paymentStatus(merchantOrderId) → VeyraLookup<OrderPaymentStatus>
   merchantOrderId: string;
-  responseStatus: ResponseStatus;       // the ORDER's: APPROVED / PENDING / DECLINED / FAILED / RETRY
+  responseStatus: ResponseStatus;       // the ORDER's: APPROVED / ACCEPTED / PENDING / DECLINED / FAILED / RETRY
   responseStatusReason: string | null;  // the deciding attempt's (UNABLE_TO_LOCATE_RECORD with no attempts)
   responseCode: string | null;          // the deciding attempt's ('25' with no attempts)
   merchantTransactionReference: string | null; transactionId: string | null; amountMinorUnits: number | null;

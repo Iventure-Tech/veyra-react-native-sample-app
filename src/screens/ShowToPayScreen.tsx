@@ -5,7 +5,11 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import QRCode from 'react-native-qrcode-svg';
 import { wallet, usePaySession, type PaymentQr, type VeyraError } from 'veyra-sdk-react-native';
 import type { RootStackParamList } from '../../App';
-import { DEVICE_NOT_BOUND_MESSAGE, DEVICE_NOT_BOUND_TITLE } from '../paymentResult';
+import {
+  ACCEPTED_WALLET_MESSAGE,
+  DEVICE_NOT_BOUND_MESSAGE,
+  DEVICE_NOT_BOUND_TITLE,
+} from '../paymentResult';
 import { theme } from '../theme';
 import { QrTile, Busy, Button, formatAmount, Field, Section } from '../ui';
 
@@ -67,6 +71,13 @@ export function ShowToPayScreen({
             ? `Paid — ${mine.merchantName}`
             : `Declined — ${mine.merchantName}`
         );
+      } else if (mine && status === 'ACCEPTED') {
+        // The merchant charged this QR and the bank accepted it: debited, credit queued. Not
+        // final, but the QR is used: take it down and keep asking until the final status.
+        if (tickRef.current) clearInterval(tickRef.current);
+        tickRef.current = null;
+        wallet.cancelQrExpiry().catch(() => {});
+        setOutcome(ACCEPTED_WALLET_MESSAGE);
       }
     }, 3000);
   };

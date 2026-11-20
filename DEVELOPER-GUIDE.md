@@ -718,10 +718,13 @@ track what you already observe instead of re-issuing on every render. See `PaySc
    remove the card and add it again on this phone** — going online or paying a smaller amount
    does not help. The SDK has stopped requesting keys for it, `requiresOnline` is always `false`
    while this is set, and it clears only when the card is removed.
-4. `!isActive` — the token is not activated and able to pay; `status` (a `TokenStatus`, or `null`
+4. `cardDataMissing` — the card's payment data is no longer on this phone (Android only; always
+   `false` on iOS). The card stays in the list but cannot pay or be selected (`setActiveToken`
+   answers `CARD_DATA_MISSING`); **tell the customer to remove the card and add it again**.
+5. `!isActive` — the token is not activated and able to pay; `status` (a `TokenStatus`, or `null`
    when the SDK has never synced it) says why on both platforms (`SUSPENDED`:
    "contact your bank" · `PENDING_ACTIVATION`: "activate this card" · `EXPIRED`: "re-add the card").
-5. Otherwise payable.
+6. Otherwise payable.
 
 `isActive` means **activated and can pay**, on both platforms. Which token payments use is a
 separate flag, `isSelected` — `true` on the one token `setActiveToken` chose. `TokenStatus` is
@@ -732,6 +735,15 @@ through as a plain string.
 `setActiveToken`, and the way a screen answers "which card would pay right now?" without inferring it
 from the list. `null` means no card is selected (never chosen, or the chosen one was removed), so
 treat it as "prompt the customer to choose" rather than as an error.
+
+The selection is stored on the phone for the signed-in customer. It survives repeated
+`Veyra.initialize` calls and an app restart, and a read straight after `setActiveToken` sees it: no
+delay is needed. The first card added to an empty wallet is selected for you, and a card is fully
+stored before `digitise` resolves (`tokenStored` on the result says so).
+
+With nobody signed in (after `signOut()`, or before `Veyra.initialize`) the call rejects with
+`NOT_SIGNED_IN`; it does not resolve `null`. Do not show that rejection as "no card": call
+`Veyra.initialize` with the customer and read again.
 
 `wallet.setActiveToken(card.tokenUniqueReference)` selects the card; on Android it also arms tap-to-pay
 (pay session required — `SESSION_REQUIRED` otherwise). It resolves a `TokenSelection`

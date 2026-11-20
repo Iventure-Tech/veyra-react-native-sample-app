@@ -718,10 +718,13 @@ track what you already observe instead of re-issuing on every render. See `PaySc
    remove the card and add it again on this phone** — going online or paying a smaller amount
    does not help. The SDK has stopped requesting keys for it, `requiresOnline` is always `false`
    while this is set, and it clears only when the card is removed.
-4. `!isActive` — the token is not activated and able to pay; `status` (a `TokenStatus`, or `null`
+4. `cardDataMissing` — the card's payment data is no longer on this phone (Android only; always
+   `false` on iOS). The card stays in the list but cannot pay or be selected (`setActiveToken`
+   answers `CARD_DATA_MISSING`); **tell the customer to remove the card and add it again**.
+5. `!isActive` — the token is not activated and able to pay; `status` (a `TokenStatus`, or `null`
    when the SDK has never synced it) says why on both platforms (`SUSPENDED`:
    "contact your bank" · `PENDING_ACTIVATION`: "activate this card" · `EXPIRED`: "re-add the card").
-5. Otherwise payable.
+6. Otherwise payable.
 
 `isActive` means **activated and can pay**, on both platforms. Which token payments use is a
 separate flag, `isSelected` — `true` on the one token `setActiveToken` chose. `TokenStatus` is

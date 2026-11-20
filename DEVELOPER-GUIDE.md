@@ -733,6 +733,15 @@ through as a plain string.
 from the list. `null` means no card is selected (never chosen, or the chosen one was removed), so
 treat it as "prompt the customer to choose" rather than as an error.
 
+The selection is stored on the phone for the signed-in customer. It survives repeated
+`Veyra.initialize` calls and an app restart, and a read straight after `setActiveToken` sees it: no
+delay is needed. The first card added to an empty wallet is selected for you, and a card is fully
+stored before `digitise` resolves (`tokenStored` on the result says so).
+
+With nobody signed in (after `signOut()`, or before `Veyra.initialize`) the call rejects with
+`NOT_SIGNED_IN`; it does not resolve `null`. Do not show that rejection as "no card": call
+`Veyra.initialize` with the customer and read again.
+
 `wallet.setActiveToken(card.tokenUniqueReference)` selects the card; on Android it also arms tap-to-pay
 (pay session required — `SESSION_REQUIRED` otherwise). It resolves a `TokenSelection`
 (`{ responseStatus, responseStatusReason, message }`) — the selection happens on the phone and

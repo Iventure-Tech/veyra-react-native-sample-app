@@ -265,7 +265,7 @@ export function PayScreen({
       )}
       {cards.map((card) => {
         const active = card.tokenUniqueReference === activeId;
-        const blocked = card.requiresOnline || !card.isActive || card.requiresActivation;
+        const blocked = card.requiresOnline || card.cardDataMissing || !card.isActive || card.requiresActivation;
         return (
           <View key={card.tokenUniqueReference} style={[styles.card, blocked && styles.cardBlocked, active && styles.cardActive]}>
             <Text style={styles.cardPan}>{card.maskedPan}</Text>
@@ -274,7 +274,8 @@ export function PayScreen({
             </Text>
             {card.requiresActivation && <Text style={styles.cardNote}>Needs activation</Text>}
             {card.requiresOnline && <Text style={styles.cardNote}>Go online to pay</Text>}
-            {!card.isActive && !card.requiresActivation && <Text style={styles.cardNote}>{card.status ?? 'Inactive'}</Text>}
+            {card.cardDataMissing && <Text style={styles.cardNote}>Remove this card and add it again</Text>}
+            {!card.isActive && !card.requiresActivation && !card.cardDataMissing && <Text style={styles.cardNote}>{card.status ?? 'Inactive'}</Text>}
             {!blocked && !active && <Button title="Use for tap" onPress={() => selectCard(card)} />}
             {active && <Text style={styles.cardNote}>Ready to tap ✓</Text>}
             <Button

@@ -101,10 +101,10 @@ Granting location is the one thing your app controls.
 
 | Group | Signals |
 |---|---|
-| Phone and app | OS version and build, model, manufacturer, your app's id, version and build, the SDK version, uptime; on card calls, when the app was first installed. Android adds the security patch level and the signing certificate digest; iOS the team id you configured (`appleTeamId`) |
+| Phone and app | form factor (phone, tablet, watch or other), OS version and build, model, manufacturer, your app's id, version and build, the SDK version, uptime; on card calls, when the app was first installed. Android adds the security patch level and the signing certificate digest; iOS the team id you configured (`appleTeamId`) |
 | Integrity | rooted or jailbroken (and what was found), emulator or simulator, debugger attached, a hooking framework in the process; Android adds developer options and USB debugging |
 | Location | position, accuracy, age of the fix, mock location; only with your app's location permission |
-| Network | network type, VPN active, the phone's public IP address; Android adds SIM state, country and operator |
+| Network | network type, VPN active, the phone's public IP address; Android adds SIM state, country and operator code (mobile country and network code) |
 | During the call | a phone or VoIP call in progress, screen mirroring or casting (iOS also recording), a screen lock set; Android adds accessibility services on (with their package names) and another app drawing over your screen |
 | React Native | where your JavaScript bundle was loaded from: embedded in the app, a development server, or downloaded (`js_bundle`) |
 | Per call | tap: the card exchange's duration and command count; customer-QR charge: time from scan to submit; scan-to-pay: time from scan to confirm, where the amount came from, how the customer confirmed, a screenshot taken while paying; key refresh: biometric enrolment changed, payments since the last refresh |
@@ -143,6 +143,17 @@ hosts, add `www.cloudflare.com`; if it is blocked, the IP goes as `TIMEOUT` or `
 behind tap-jacking. To see that mark, the SDK wraps each activity window's `Window.Callback` with a
 pass-through: every event reaches React Native unchanged. Only the time of the last touch and of the
 last covered touch are kept.
+
+**Payment evidence on a tap or customer QR.** The customer's phone also proves itself on each
+payment. On a tap (Android) and in the customer QR (both), the wallet adds a short sealed record to the
+card data: the phone's evidence for this payment, signed by a key the SDK makes for the card in the
+phone's secure hardware and sealed so only Veyra can open it. The merchant's phone carries it unread and
+forwards it with the payment. There is nothing to call: the key is made when a card is added and renewed
+at each key refresh, so a card added with an SDK before 3.0.9 carries no evidence until its next key
+refresh. On iOS the key signs only while the phone has a passcode; without one the QR goes without
+evidence. The record also says how the customer last authenticated: biometric or screen lock on
+Android 11 and later; on iOS only when, since iOS doesn't say which method answered. A merchant app on
+an older SDK ignores the record and the payment goes ahead without it.
 
 **Your privacy disclosures.** Declare this in Google Play's Data safety form, your App Store privacy
 details and your privacy policy, as data collected for fraud prevention and security and sent to Veyra

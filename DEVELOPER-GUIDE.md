@@ -2660,6 +2660,7 @@ Wallet API only. No `responseCode` except on add-card.
 | Add card (`wallet.digitise`) | `APPROVED` | `APPROVED` | — | the card is added and active |
 | Add card | `APPROVED` | `APPROVE_REQUIRE_AUTH` | — (or the identity mismatch, below) | added, but the customer must activate it — run activation with the returned `activationMethods` (§6.2) |
 | Add card | `DECLINED` | `DECLINED` | the issuer's reason (below) | the issuer refused this account; show the reason |
+| Add card | `DECLINED` | `DECLINED` | `SUSPECTED_FRAUD` | Veyra's fraud checks refused this add-card before anything was created; no card is stored. Don't retry automatically; tell the customer the card can't be added and to contact their bank |
 | Add card | `FAILED` | — | `INTERNAL_ERROR` | the Veyra token service could not complete it; start a new add-card |
 | Add card | `FAILED` | — | `NO_RESPONSE_RECEIVED` / `UPSTREAM_ERROR` | no answer (Table A). The card may have been created without reaching the phone: switch it off with `wallet.deactivateDigitise(result.clientRequestId)`, then start a new add-card |
 | Activation code request (`wallet.requestActivationCode`) | `FAILED` | — | `TOKEN_NOT_FOUND`, `ACTIVATION_LOCKED`, `CODE_REQUEST_RATE_LIMITED`, `ACTIVATION_FAILED` | can't send a code now; locked / rate-limited → wait or contact the issuer |

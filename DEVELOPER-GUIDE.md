@@ -536,6 +536,18 @@ await Veyra.initialize(customerId, {
 | `requireAdditionalQrAuthenticationPrompt` | Optional | Default `true`: show the authentication sheet before every QR payment. `false` skips it when the phone's secure hardware confirms a recent unlock — see *Skipping the sheet after a recent unlock* in §6.5. |
 | `cdcvmPayTitle` / `cdcvmPaySubtitle` / `cdcvmShowQrTitle` / `cdcvmShowQrSubtitle` / `cdcvmAllowDeviceCredential` | Optional | The authentication sheet's wording and whether it offers the device passcode (§6.5). |
 
+
+### 4.5 Optional SoftPOS settings
+
+| `softpos` key | Required | Description |
+|---|---|---|
+| `requestTimeoutSeconds` | Optional | The longest the SoftPOS SDK waits for one backend call, whole seconds 5–60. Unset means 60 s (§4.3). |
+| `statusPollFirstGapSeconds` | Optional | How often the SoftPOS SDK checks an open payment's status in the first 2 minutes after its status last changed, whole seconds. Unset means 5 s; a value below 2 is raised to 2, and the SDK logs one warning. A fractional value makes `initialize` reject with `INVALID_CONFIGURATION`. The full schedule is in §6.6. |
+
+```ts
+softpos: { environment: 'TEST', paymentAppProviderId, statusPollFirstGapSeconds: 3 },
+```
+
 ## 5. Sessions — how payment screens work in React Native
 
 **This is the one genuinely React-Native-specific concept.** The SDK arms the device
@@ -1029,11 +1041,29 @@ generated-QR rows learn it from the status poll, so `null` on a still-open row m
 learned yet", not "no order id". For display and reconciliation — receipts and status
 refreshes key off `transactionHash` / `merchantTransactionReference`.
 
-**How the SDK waits for a `PENDING` or `ACCEPTED` row** (wallet and merchant alike). You do not have to
-poll, schedule anything, or keep a screen open — the native SDK under the bridge asks on its
-own with **exponential backoff**: the first re-checks come within seconds (most payments
-settle at once) and the interval doubles to a steady state of roughly **once an hour**. It
-keeps that up for **30 days** from the transaction date, then stops asking.
+**How the SDK waits for a `PENDING` or `ACCEPTED` row.** You do not have to poll, schedule
+anything, or keep a screen open — the native SDK under the bridge asks on its own, for **30 days**
+from the transaction date, then stops asking.
+
+- **Merchant (`softpos`):** each payment is timed from **when its status last changed** (when it
+  was taken, and again at each change, `'PENDING'` → `'ACCEPTED'` say), and the wait is counted
+  from when the previous answer came back, so there are never two checks out for one payment:
+
+  | Since the last status change | Checked every |
+  |---|---|
+  | under 2 minutes | 5 s, or the `statusPollFirstGapSeconds` you set (at least 2 s; §4.5) |
+  | 2–5 minutes | 10 s |
+  | 5–10 minutes | 30 s |
+  | 10–60 minutes | 5 minutes |
+  | 1–24 hours | 30 minutes |
+  | after that | once a day |
+
+  A failed check (no network, a timeout) doesn't restart the clock and waits twice the gap; a
+  payment handed to a person for reconciliation is checked at most every 2 minutes.
+  `softpos.observeTransactionResolved` fires at `'ACCEPTED'` and again at the final status, so
+  your app needs no polling loop of its own.
+- **Wallet:** with **exponential backoff**: the first re-checks come within seconds (most
+  payments settle at once) and the interval doubles to a steady state of roughly **once an hour**.
 
 **Stopping is not an outcome.** At 30 days the row keeps whatever status it has — still
 `'PENDING'`, which is still true — and simply leaves the poll list. The SDK never writes
@@ -1041,7 +1071,7 @@ keeps that up for **30 days** from the transaction date, then stops asking.
 was. The same holds for an `'ACCEPTED'` row. Treat a long-`'PENDING'` row as *unresolved*, not failed, however old it is.
 
 **Let the user ask on demand — `refreshTransactionStatus`.** The SDK polls a pending
-transaction for you with **exponential backoff**, and **stops after 30 days**. Polling never
+transaction for you (above), and **stops after 30 days**. Polling never
 invents an outcome — a row that ages out simply stops being asked about and stays
 `'PENDING'`. Expose **`refreshTransactionStatus`** in your UI so the user can ask on demand,
 which is the route for anything still pending after the window closes.

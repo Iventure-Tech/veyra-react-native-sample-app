@@ -36,7 +36,7 @@
 	<key>NSCameraUsageDescription</key>
 	<string>Scan payment and receipt QR codes.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string></string>
+	<string>Your location is sent with each payment and card you add, to help check that each payment is really yours.</string>
 	<key>RCTNewArchEnabled</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>

@@ -4,6 +4,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import Veyra, { softpos, type VeyraMode } from 'veyra-sdk-react-native';
 import type { RootStackParamList } from '../../App';
+import { beforePayment } from '../locationAsk';
 import { useSession } from '../session';
 import { theme } from '../theme';
 import { Button, Section } from '../ui';
@@ -68,7 +69,12 @@ export function HomeScreen({
         <Button
           title={registered === false ? 'Set up your merchant' : 'Accept payments'}
           disabled={!signedIn}
-          onPress={() => navigation.navigate(registered === false ? 'RegisterMerchant' : 'GetPaid')}
+          onPress={() =>
+            registered === false
+              ? navigation.navigate('RegisterMerchant')
+              : // Location is asked for once before the first payment (see locationAsk.ts).
+                beforePayment(() => navigation.navigate('GetPaid'))
+          }
         />
         <Button
           title="Merchant transactions"
@@ -82,7 +88,11 @@ export function HomeScreen({
         />
       </Section>
       <Section title="Pay (wallet)">
-        <Button title="My cards & pay" disabled={!signedIn} onPress={() => navigation.navigate('Pay')} />
+        <Button
+          title="My cards & pay"
+          disabled={!signedIn}
+          onPress={() => beforePayment(() => navigation.navigate('Pay'))}
+        />
       </Section>
       <Text style={styles.mode}>NFC mode: {mode} (read-only — follows your screens)</Text>
     </ScrollView>

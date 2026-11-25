@@ -62,7 +62,8 @@ machine repo.veyra.co
 
 - **Android:** NFC/HCE permissions and the SDK's card-emulation service merge
   automatically from the SDK's own manifests. Add only what your app itself needs —
-  this sample adds `CAMERA` (QR scanning) and location (payment device info). See
+  this sample adds `CAMERA` (QR scanning) and location (the payment's fraud evidence, see
+  [Device evidence for fraud checks](#device-evidence-for-fraud-checks)). See
   `android/app/src/main/AndroidManifest.xml`.
   - The service's configuration comes from the SDK's own `res/xml/apdu_service.xml`. Its
     shipped default is `android:requireDeviceUnlock="false"` — the phone answers a terminal
@@ -78,7 +79,89 @@ machine repo.veyra.co
   Communication Tag Reading** capability on your target — it puts the
   `com.apple.developer.nfc.readersession.formats` entitlement (`TAG`) in your
   entitlements file, and **a reader session will not start without it**, whatever
-  Info.plist says. Camera usage description for QR scanning.
+  Info.plist says. Camera usage description for QR scanning, and
+  `NSLocationWhenInUseUsageDescription` for location (it must not be empty: App Review rejects
+  an empty usage string).
+
+### Device evidence for fraud checks
+
+From SDK 3.0.9, every call that starts or supports a payment, or adds a card, carries a block of
+evidence about the phone. On the merchant's phone that is the tap, the customer-QR charge, the QR
+create and registration; on the customer's phone, eligibility, add card, activation, key refresh,
+scan-to-pay and show-QR. The native SDK collects and sends it itself: there is nothing to call from
+JavaScript, and nothing turns it off. On every call where the phone proves itself (all but
+eligibility), its hardware key signs the evidence with the request, so it can't be altered on the way.
+
+The fraud checks trust a phone that sends its evidence more than one that doesn't. A signal the SDK
+can't read is sent as unavailable with its reason (`NOT_SUPPORTED_ON_PLATFORM`, `PERMISSION_DENIED`,
+`TIMEOUT`, `NO_BASELINE` or `ERROR`), never guessed, and a missing signal counts against the payment.
+Granting location is the one thing your app controls.
+
+**What is sent.**
+
+| Group | Signals |
+|---|---|
+| Phone and app | form factor (phone, tablet, watch or other), OS version and build, model, manufacturer, your app's id, version and build, the SDK version, uptime; on card calls, when the app was first installed. Android adds the security patch level and the signing certificate digest; iOS the team id you configured (`appleTeamId`) |
+| Integrity | rooted or jailbroken (and what was found), emulator or simulator, debugger attached, a hooking framework in the process; Android adds developer options and USB debugging |
+| Location | position, accuracy, age of the fix, mock location; only with your app's location permission |
+| Network | network type, VPN active, the phone's public IP address; Android adds SIM state, country and operator code (mobile country and network code) |
+| During the call | a phone or VoIP call in progress, screen mirroring or casting (iOS also recording), a screen lock set; Android adds accessibility services on (with their package names) and another app drawing over your screen |
+| React Native | where your JavaScript bundle was loaded from: embedded in the app, a development server, or downloaded (`js_bundle`) |
+| Per call | tap: the card exchange's duration and command count; customer-QR charge: time from scan to submit; scan-to-pay: time from scan to confirm, where the amount came from, how the customer confirmed, a screenshot taken while paying; key refresh: biometric enrolment changed, payments since the last refresh |
+
+What one platform adds, the other sends as `NOT_SUPPORTED_ON_PLATFORM`. Android before 14 sends the
+screenshot signal that way too. `NO_BASELINE` is normal: it means there was nothing yet to compare
+with (no touch seen yet, a first key refresh).
+
+**Location.** The SDK never asks for a permission. It sends the phone's location when your app
+already holds it, and `PERMISSION_DENIED` when it doesn't.
+
+- Declare it: on Android, `ACCESS_FINE_LOCATION` and `ACCESS_COARSE_LOCATION` (the SoftPOS SDK's
+  manifest merges both; a wallet-only app adds them); on iOS, `NSLocationWhenInUseUsageDescription`.
+- Ask before the first payment or card added, with a short explanation first. The use isn't obvious
+  to the user, and Google Play asks for an in-app explanation before the prompt in that case. On
+  Android ask for both permissions together, so Android 12 and later offer "precise" and
+  "approximate". Never block the payment on the answer. React Native has no iOS location prompt of
+  its own: the sample uses `react-native-permissions` (with only `LocationWhenInUse` set up in its
+  `ios/Podfile`) and asks once, from its home screen, in `src/locationAsk.ts`.
+- Precise is better: the fraud checks compare where the merchant's and the customer's phones are,
+  within a couple of hundred metres, and approximate location can be off by kilometres.
+- When a payment starts, and whenever the merchant's app comes to the foreground, the SDK asks for a
+  current position and gives up after 2 seconds; the payment never waits for it.
+
+**Permissions the Android SDKs merge for the evidence:** `ACCESS_NETWORK_STATE` (both SDKs: network
+type and VPN state) and `DETECT_SCREEN_CAPTURE` (wallet SDK: a screenshot during scan-to-pay, Android
+14 and later). Both are granted at install, with no prompt. iOS needs no other key or entitlement.
+
+**The public IP lookup.** A phone can't read its own public IP, so the SDK asks Cloudflare
+(`https://www.cloudflare.com/cdn-cgi/trace`) at start, when the app comes to the foreground and when
+the network changes, and keeps the answer for 5 minutes. It is the one request the SDK makes outside
+your connection to Veyra, and a payment never waits for it. If your network allow-lists outbound
+hosts, add `www.cloudflare.com`; if it is blocked, the IP goes as `TIMEOUT` or `ERROR`.
+
+**Overlay detection (Android).** Android marks a touch when another app's window covers it, the trick
+behind tap-jacking. To see that mark, the SDK wraps each activity window's `Window.Callback` with a
+pass-through: every event reaches React Native unchanged. Only the time of the last touch and of the
+last covered touch are kept.
+
+**Payment evidence on a tap or customer QR.** The customer's phone also proves itself on each
+payment. On a tap (Android) and in the customer QR (both), the wallet adds a short sealed record to the
+card data: the phone's evidence for this payment, signed by a key the SDK makes for the card in the
+phone's secure hardware and sealed so only Veyra can open it. The merchant's phone carries it unread and
+forwards it with the payment. There is nothing to call: the key is made when a card is added and renewed
+at each key refresh, so a card added with an SDK before 3.0.9 carries no evidence until its next key
+refresh. On iOS the key signs only while the phone has a passcode; without one the QR goes without
+evidence. The record also says how the customer last authenticated: biometric or screen lock on
+Android 11 and later; on iOS only when, since iOS doesn't say which method answered. A merchant app on
+an older SDK ignores the record and the payment goes ahead without it.
+
+**Your privacy disclosures.** Declare this in Google Play's Data safety form, your App Store privacy
+details and your privacy policy, as data collected for fraud prevention and security and sent to Veyra
+with the payment: location (precise or approximate, when granted); device and app information (model,
+OS build, app id and version); the phone's public IP address, which Cloudflare also sees when the SDK
+looks it up; on Android, the package names of accessibility services that are switched on; and the
+device-state facts in the table above. The SDK reads nothing on other apps' screens and nothing about
+their content.
 
 ### Expo
 
@@ -2577,6 +2660,7 @@ Wallet API only. No `responseCode` except on add-card.
 | Add card (`wallet.digitise`) | `APPROVED` | `APPROVED` | — | the card is added and active |
 | Add card | `APPROVED` | `APPROVE_REQUIRE_AUTH` | — (or the identity mismatch, below) | added, but the customer must activate it — run activation with the returned `activationMethods` (§6.2) |
 | Add card | `DECLINED` | `DECLINED` | the issuer's reason (below) | the issuer refused this account; show the reason |
+| Add card | `DECLINED` | `DECLINED` | `SUSPECTED_FRAUD` | Veyra's fraud checks refused this add-card before anything was created; no card is stored. Don't retry automatically; tell the customer the card can't be added and to contact their bank |
 | Add card | `FAILED` | — | `INTERNAL_ERROR` | the Veyra token service could not complete it; start a new add-card |
 | Add card | `FAILED` | — | `NO_RESPONSE_RECEIVED` / `UPSTREAM_ERROR` | no answer (Table A). The card may have been created without reaching the phone: switch it off with `wallet.deactivateDigitise(result.clientRequestId)`, then start a new add-card |
 | Activation code request (`wallet.requestActivationCode`) | `FAILED` | — | `TOKEN_NOT_FOUND`, `ACTIVATION_LOCKED`, `CODE_REQUEST_RATE_LIMITED`, `ACTIVATION_FAILED` | can't send a code now; locked / rate-limited → wait or contact the issuer |
@@ -3161,6 +3245,8 @@ See `src/cancel.ts` (the answer → action rule, unit-tested) and the three scre
 | `merchantOrderId` (required) on `chargeCustomerQr` | ✅ | ✅ |
 | `merchantOrderId` (required) on `tap.start` | ✅ | ✅ |
 | `merchantOrderId` (required) on `createPaymentContext` | ✅ | ✅ |
+| Fraud evidence: security patch level, signing digest, developer options, USB debugging, SIM, accessibility services, overlay | ✅ | `NOT_SUPPORTED_ON_PLATFORM` (see [Device evidence](#device-evidence-for-fraud-checks)) |
+| Fraud evidence: screen recording by another app | — (mirroring and casting only) | ✅ |
 | `softpos.cancelPayment` (tap, customer-QR charge, get-paid QR create) | ✅ | ✅ |
 | `wallet.cancelPayment` (scan-to-pay) / `wallet.cancelDigitise` | ✅ | ✅ |
 

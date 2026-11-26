@@ -2146,7 +2146,10 @@ The rules below are the same for all four, and are worth reading once:
 
 - **Subscribe once, at start-up** — not per screen. The changes that matter most happen while no
   screen is watching (a card suspended, a merchant deactivated, a payment settling days later), so
-  a per-screen subscription misses exactly the cases these exist for.
+  a per-screen subscription misses exactly the cases these exist for. The sample subscribes to the
+  payment events (`softpos.observeTransactionResolved`, `wallet.observeTransactionResolved`,
+  `wallet.observeCreditConfirmation`) in `src/session.tsx` (`src/paymentEventLog.ts`) and logs each one
+  with the prefix `VeyraEvents`.
 - **There is no replay.** If your app was not running when it happened, nothing is queued. Keep
   reading the store when a screen appears (`wallet.getTokens()`, `wallet.getTransactions()`,
   `softpos.getStoredMerchantData()`); these events are a live update *on top of* that read, never a

@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
 import Veyra from 'veyra-sdk-react-native';
 import { VEYRA_CONFIG, VEYRA_PROVIDER } from '../veyra.config';
 import { appProvider } from './provider';
+import { observePaymentEvents } from './paymentEventLog';
 
 /**
  * The app's own login session. Who is logged in is the banking app's to remember, never the
@@ -67,6 +68,11 @@ export function SessionProvider(props: {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // App-scope payment events, subscribed before the first initialise so none is missed. On React
+  // Native a subscription survives sign-out and a customer switch (the SDK re-arms the native
+  // side), so this subscribes once; the teardown removes only these subscriptions.
+  useEffect(() => observePaymentEvents(), []);
 
   // Every launch tells the SDK who is logged in; a signed-out app tells it nothing.
   useEffect(() => {

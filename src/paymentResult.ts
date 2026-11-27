@@ -1,9 +1,9 @@
 import type {
   CustomerQrChargeOutcome,
+  MerchantTransaction,
   TapResult,
   OrderPaymentStatus,
   OriginalPayment,
-  PaymentContextStatus,
   PaymentOutcome,
   ResponseStatus,
   VeyraLookup,
@@ -40,6 +40,13 @@ export interface PaymentResultParams {
    * place, so the merchant is not left staring at "Pending" until they navigate away.
    */
   resolvesFor?: string;
+  /**
+   * With `resolvesFor`: the sale is a merchant QR that a wallet has claimed and whose payment has
+   * no outcome yet (claimed-PENDING). The result screen then holds (no auto-return), offers no
+   * receipt, and also watches the stored row for the claim being released: the wallet's payment
+   * was never sent to its bank, so nothing was charged.
+   */
+  claimedQr?: boolean;
   /**
    * Present when an approved sale may be waiting on beneficiary credit confirmation — the
    * result screen then shows "Confirming credit with merchant bank…" and flips it when the
@@ -83,6 +90,9 @@ export const ACCEPTED_MERCHANT_MESSAGE =
 const ACCEPTED_MERCHANT_DETAIL =
   'Not final yet. Do not release goods until this payment is approved. The app keeps checking and will show the result here.';
 export const ACCEPTED_WALLET_MESSAGE = 'Payment accepted - waiting for credit approval';
+/** The customer's shown QR was charged by a merchant and the payment has no outcome yet. */
+export const CHARGED_PENDING_WALLET_MESSAGE =
+  "The merchant has charged this code - payment pending. Don't pay again; the result will show here and in your transactions.";
 const ACCEPTED_WALLET_DETAIL =
   "You have been debited and the merchant's bank is being credited. Don't pay again - the result will show in your transactions.";
 
@@ -133,6 +143,43 @@ export function acceptedToParams(
     resolvesFor: reference ?? undefined,
   };
 }
+
+/** What the merchant is told while a claimed merchant QR's payment has no outcome yet. */
+export const CLAIMED_PENDING_MERCHANT_MESSAGE =
+  'A customer has scanned this code and the payment is being processed. Wait for approval before releasing goods';
+
+/**
+ * Claimed-PENDING: a customer's wallet has claimed the merchant's QR and its payment has no
+ * outcome yet. The QR is used, so it is off the screen. No `receiptFor` and no
+ * `creditConfirmation`: neither exists until the payment is `APPROVED`. `resolvesFor` makes the
+ * result screen wait on the sale and show what happens to it in place.
+ */
+export function claimedPendingToParams(
+  reference: string,
+  amountMinorUnits: number
+): PaymentResultParams {
+  return {
+    outcome: 'pending',
+    title: 'Payment Pending',
+    message: CLAIMED_PENDING_MERCHANT_MESSAGE,
+    amountMinorUnits,
+    details: lines(ACCEPTED_MERCHANT_DETAIL, `Reference: ${reference}`),
+    resolvesFor: reference,
+    claimedQr: true,
+  };
+}
+
+/**
+ * A claimed merchant QR whose claim was released: the wallet's payment was never sent to its
+ * bank (or the QR has since expired unpaid). Nothing was charged; the merchant shows a new code.
+ */
+export const CLAIM_RELEASED: PaymentResolution = {
+  final: true,
+  outcome: 'not_sent',
+  title: 'Payment Not Sent',
+  message:
+    "The customer's payment was not sent to their bank and nothing was charged. Show a new code to try again.",
+};
 
 /** How a sale the result screen is waiting on reads now. */
 export interface PaymentResolution {
@@ -298,26 +345,31 @@ export function tapResultToParams(
 }
 
 /**
- * A merchant-presented QR the customer pushed to. Only called once the context has
- * settled — an expired code is not a result, it stays on the QR screen with a renewal
- * action, exactly as the native samples leave it.
+ * A merchant QR sale that reached its final status, from its stored row: approved, or not
+ * (declined, failed).
  */
-export function contextSettlementToParams(
-  status: PaymentContextStatus,
+export function qrSaleSettledToParams(
+  row: MerchantTransaction,
   amountMinorUnits: number
 ): PaymentResultParams {
+  const approved = row.status === 'APPROVED';
+  const reference = row.merchantTransactionReference;
   return {
-    outcome: status.isApproved ? 'approved' : 'declined',
-    title: status.isApproved ? 'Payment Successful' : 'Declined',
+    outcome: approved ? 'approved' : 'declined',
+    title: approved ? 'Payment Successful' : 'Declined',
     message: 'Customer paid by QR',
     amountMinorUnits,
-    details: lines(`Ref: ${status.txRef}`, `Response: ${status.responseCode ?? '-'}`),
-    receiptFor: status.isApproved ? status.txRef : undefined,
-    // The context settle carries no credit fields — `supported: null` makes the result
-    // screen watch the SDK's stored row (which learns them from the transaction-status
-    // rail moments after the settle) and wait once the flag turns up true.
-    creditConfirmation: status.isApproved
-      ? { reference: status.txRef, creditTransactionId: null, supported: null }
+    details: lines(`Ref: ${reference}`, `Response: ${row.responseCode ?? '-'}`),
+    receiptFor: approved ? reference : undefined,
+    // The row learns whether the merchant's bank supports credit confirmation moments after the
+    // approval. `supported: null` makes the result screen watch the stored row and wait once
+    // the flag turns up true.
+    creditConfirmation: approved
+      ? {
+          reference,
+          creditTransactionId: row.creditTransactionId,
+          supported: row.isCreditConfirmationSupported,
+        }
       : undefined,
   };
 }

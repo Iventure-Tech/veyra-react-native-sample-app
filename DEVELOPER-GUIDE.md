@@ -944,33 +944,50 @@ if (qr.responseStatus === 'APPROVED' && qr.payload) {
 }
 ```
 
-To show "paid ✓" while the QR is up, check **this QR's own payment**: call
-`wallet.refreshTransactionStatus(qr.transactionHash)` every few seconds — one request per check —
-and stop on a final status:
+**Do not poll while the QR is on screen. The SDK does.** The QR's history row is created
+`'PENDING'` as soon as the QR is shown, and the SDK checks that payment with the gateway by itself,
+as often as the gateway tells it to. Your screen re-reads the row from
+`wallet.getTransactions(tokenUniqueReference, limit)` (a local read: nothing is sent; the sample
+reads it once a second), finds it by `transactionHash`, and shows what it says:
+
+| The stored row | What happened | What the screen does |
+|---|---|---|
+| `authorizationStatus` `'PENDING'`, `isCharged` `null` | No merchant has charged the QR yet | Keep the QR on screen |
+| `authorizationStatus` `'PENDING'`, `isCharged` `true` | **A merchant charged the QR and the payment has no outcome yet** | **Take the QR down** and show "payment pending - don't pay again"; keep reading the row |
+| `authorizationStatus` `'ACCEPTED'` | Debited, credit queued. Not final | Take the QR down and show "payment accepted"; keep reading the row |
+| `authorizationStatus` `'APPROVED'` / `'DECLINED'` / `'FAILED'` | The payment ended | Show the result |
+
+`isCharged` (`boolean | null`) is on `TransactionSummary`: `true` once the gateway has returned a
+payment for this QR's hash (a merchant charged it), `null` until then and on rows from other rails.
+It is never `false`.
 
 ```ts
 const hash = qr.transactionHash;
-if (hash) {
+const card = qr.tokenUniqueReference;
+if (hash && card) {
   const timer = setInterval(async () => {
-    // failureReason set when the check could not be made (offline, throttled…): just ask again next time
-    const row = (await wallet.refreshTransactionStatus(hash)).value;
-    const status = row?.authorizationStatus;
+    // A local read. The newest rows are enough: this payment was recorded moments ago.
+    const rows = await wallet.getTransactions(card, 20).catch(() => null);
+    const row = rows?.find((r) => r.transactionHash?.toLowerCase() === hash.toLowerCase());
+    if (!row) return;
+    const status = row.authorizationStatus;
     if (status === 'APPROVED' || status === 'DECLINED' || status === 'FAILED') {
       clearInterval(timer);
       onSettled(status === 'APPROVED');
+    } else if (status === 'ACCEPTED') {
+      onAccepted();          // debited, credit queued: the QR is spent. Take it down, keep watching.
+    } else if (row.isCharged === true) {
+      onChargedPending();    // charged, no outcome yet: the QR is used. Take it down, keep watching.
     }
-    // Debited, credit queued: the QR is spent. Take it down, say "payment accepted", keep asking.
-    if (status === 'ACCEPTED') onAccepted();
-    // PENDING (the QR's own row exists from the moment it is shown), RETRY, or no row yet: keep the QR up
-  }, 3000);
-  // clear the timer on expiry (onExpired) and when the screen unmounts
+  }, 1000);
+  // clear the timer when the screen unmounts
 }
 ```
 
-The QR's history row is created `'PENDING'` as soon as the QR is shown, so finding the row is not
-the answer — only a final status is. **Don't loop `reconcilePendingTransactions()` here:** it asks
-about every open payment on the device back-to-back, so on a short loop it gets the wallet
-throttled (`429`) by the gateway.
+Finding the row is not the answer (it exists from the moment the QR is shown): only `isCharged`
+or a status says the QR was used. **Don't loop `refreshTransactionStatus()` or
+`reconcilePendingTransactions()` here:** they repeat requests the SDK already sends, and on a short
+loop they get the wallet throttled (`429`) by the gateway.
 
 **Device authentication (CDCVM) is the SDK's job — there is no method to call.**
 `payScannedContext` and `showQrToPay` raise the OS authentication sheet themselves
@@ -1115,7 +1132,8 @@ always safe either way.
 
 It asks about **every** open row on the device, so call it on an occasion — app foregrounded,
 pull-to-refresh, history opened — **never on a loop**; a screen waiting for one payment (a shown QR)
-calls `refreshTransactionStatus` with that payment's hash instead. If the gateway throttles (`429`),
+sends nothing: it reads that payment's stored row, which the SDK keeps up to date. A "check now"
+button for one payment calls `refreshTransactionStatus` with its hash. If the gateway throttles (`429`),
 the pass stops there and the remaining rows wait for the SDK's next sweep.
 
 `TransactionSummary` also carries `merchantOrderId` — the merchant's own order/basket id for
@@ -1508,7 +1526,7 @@ taps toward your launcher activity and away from the session.
 | Call | What it does | Returns |
 |---|---|---|
 | `createPaymentContext(amountMinorUnits: number, currency: string \| undefined = '566', merchantOrderId: string, onExpired?: () => void)` | Merchant-presented QR (MPM): creates a gateway-signed payment context for the stored merchant; render `mpmPayload` as the QR. `onExpired` fires once when the QR lapses. | `Promise<PaymentContextQr>` |
-| `contextStatus(txRef: string)` | Polls the QR's payment context until it settles or expires. | `Promise<VeyraLookup<PaymentContextStatus>>` |
+| `contextStatus(txRef: string)` | Asks the gateway once for the QR's state. **Not needed while a QR is on screen:** the SDK checks a displayed QR by itself and writes each answer onto the sale's stored row, so your screen reads the row (`getTransaction(txRef)`) instead. | `Promise<VeyraLookup<PaymentContextStatus>>` |
 | `cancelQrExpiry()` | Stops the expiry watch `createPaymentContext` armed (call on teardown). | `Promise<void>` |
 | `inspectCustomerQr(payload: string)` | Customer-presented QR (CPM): decodes and validates a scanned payload. Nothing is sent. | `Promise<CustomerQrInspection>` |
 | `chargeCustomerQr(handle: string, merchantOrderId: string)` | Charges the confirmed customer QR (by the inspection's `handle`) for the amount it carries. | `Promise<CustomerQrChargeOutcome>` |
@@ -1523,17 +1541,36 @@ taps toward your launcher activity and away from the session.
   | `'PENDING'` | `NO_RESPONSE_RECEIVED`, `UPSTREAM_ERROR` | Sent, no usable answer, so there is no QR to show. Create a new QR |
   | `'NOT_SENT'` | `INVALID_REQUEST` (blank order id), `MISSING_MANDATORY_CONFIG` (no merchant registered), `NO_NETWORK_CONNECTION`, `NOT_AUTHENTICATED` | Nothing was sent. Fix the reason and create it again with the **same** order id |
 
-  Then poll `contextStatus(txRef)` → `VeyraLookup<PaymentContextStatus>`: `value.state` is the
-  QR's lifecycle (`PENDING → IN_FLIGHT → APPROVED/DECLINED/EXPIRED`). A poll that could not be
-  made carries `failureReason` and `value: null` — keep the QR on screen and poll again; a failed
-  poll never changes the QR's state. Pass `onExpired` as the fourth argument —
+  **Then do not poll. The SDK does.** From the moment `createPaymentContext` answers, the SDK
+  checks the QR with the gateway by itself, as often as the gateway tells it to, across every
+  screen, and writes each answer onto the sale's stored row. Your QR screen re-reads that row with
+  `softpos.getTransaction(txRef)` (a read of the phone's own store: nothing is sent; the sample
+  reads it once a second) and shows what it says:
+
+  | The stored row | What happened | What the screen does |
+  |---|---|---|
+  | `status` `'PENDING'`, `isQrClaimed` `null` or `false` | Nobody has claimed the QR (`false`: a wallet claimed it, its payment was never sent to the bank, and the QR is payable again) | Keep the QR on screen |
+  | `status` `'PENDING'`, `isQrClaimed` `true` | **A wallet has claimed the QR and its payment has no outcome yet.** Nobody else can pay this code | **Take the QR down** and show "payment pending"; keep reading the row |
+  | `status` `'ACCEPTED'` | The customer was debited and the credit is queued. Not final | Take the QR down and show "payment accepted" (see [An `ACCEPTED` payment](#an-accepted-payment-the-customer-is-debited-the-credit-is-still-to-come)); keep reading the row |
+  | `status` `'APPROVED'` / `'DECLINED'` / `'FAILED'` | The payment ended | Take the QR down; result screen (and receipt when approved) |
+  | No row (`getTransaction` resolves `null`) | The QR expired unpaid. An expired QR is never recorded | Blank the QR and offer a new one |
+
+  `isQrClaimed` (`boolean | null`) is on `MerchantTransaction` for merchant-QR sales: `true` once a
+  wallet has claimed the QR, `false` when that claim was released, `null` while no claim has been
+  seen (and on every other rail). A claimed-pending screen that later reads `isQrClaimed` `false`
+  (or no row) tells the merchant nothing was charged and offers a new QR.
+
+  Pass `onExpired` as the fourth argument —
   `createPaymentContext(amountMinorUnits, currency, merchantOrderId, () => blankTheQr())` — to be told
   once when the QR expires (a new create replaces it; `cancelQrExpiry()` on teardown stops it), as
-  the `onExpired` parameter does on Android and iOS. When the customer's payment ends `RETRY` (Veyra did not send it to the
-  bank), the QR goes back to `PENDING` and stays payable until it expires — keep polling; the
-  customer can pay it again. Once it has expired, create a new QR for the **same** order id.
-  **An accepted push does not settle the QR.** When the customer's bank debits them and queues the credit,
-  the context stays unsettled while the SDK writes `ACCEPTED` onto the sale's stored row. Read the row (`softpos.getTransaction(txRef)`) in the same poll; when its status is `ACCEPTED`, take the QR down and show "payment accepted" — see [An `ACCEPTED` payment](#an-accepted-payment-the-customer-is-debited-the-credit-is-still-to-come).
+  the `onExpired` parameter does on Android and iOS. Once a QR has expired, create a new QR for the
+  **same** order id.
+
+  `contextStatus(txRef)` → `VeyraLookup<PaymentContextStatus>` is still there for a **single,
+  on-demand** question: `value.state` is the QR's lifecycle
+  (`PENDING → IN_FLIGHT → APPROVED/DECLINED/EXPIRED`); a request that could not be made carries
+  `failureReason` and `value: null`. Never call it on a timer: that only repeats the requests the
+  SDK already sends.
 - **Charge a customer QR (consumer-presented):** `inspectCustomerQr(payload)` →
   `CustomerQrInspection`. `'APPROVED'` carries `qr` (`{ handle, maskedCard, amountMinorUnits,
   currencyCode, cardholderName }` — `currencyCode` is ISO 4217 numeric, three digits, e.g. `'566'`) — confirm its amount on screen. A payload that is not a
@@ -1555,11 +1592,17 @@ const qr = await softpos.createPaymentContext(minorUnits, undefined, orderIdForA
 attemptEnded(qr.responseStatus);                     // the retry rule, §9.3
 if (qr.responseStatus === 'APPROVED' && qr.txRef && qr.mpmPayload) {
   show(qr.mpmPayload);
-  const poll = setInterval(async () => {
-    const { value } = await softpos.contextStatus(qr.txRef!);
-    if (!value) return;                              // the poll could not be made — ask again
-    if (value.isSettled) { clearInterval(poll); finish(value); }
-  }, 2000);
+  const txRef = qr.txRef;
+  // Watch the stored row. A local read: the SDK does the asking.
+  const watch = setInterval(async () => {
+    const row = await softpos.getTransaction(txRef).catch(() => undefined);
+    if (row === undefined) return;                   // the read failed: says nothing about the row
+    if (row === null) { clearInterval(watch); blankTheQr(); return; }   // expired unpaid
+    if (['APPROVED', 'DECLINED', 'FAILED'].includes(row.status)) { clearInterval(watch); finish(row); }
+    else if (row.status === 'ACCEPTED') { clearInterval(watch); showAccepted(txRef); }   // QR down; result screen waits
+    else if (row.isQrClaimed === true) { clearInterval(watch); showPending(txRef); }     // QR down; result screen waits
+    // else: unclaimed. The QR stays up.
+  }, 1000);
 } else if (qr.responseStatusReason === 'DUPLICATE_MERCHANT_ORDER_ID') {
   alert(duplicateOrderMessage(qr.originalPayment)); // never "try again"
 } else {
@@ -1621,9 +1664,11 @@ then the QR stays locked, so an unknown outcome can never lead to a second debit
 
 What this means for your app:
 
-- **Merchant (`softpos.contextStatus(txRef)`).** Keep polling while the state is `'PENDING'` or `'IN_FLIGHT'`.
-  `'IN_FLIGHT'` can go back to `'PENDING'` when a payment ended `'RETRY'`, because the QR is
-  payable again, so keep it on screen. On `'DECLINED'`, take the QR down: it can't be paid again.
+- **Merchant (the stored row, `softpos.getTransaction(txRef)`).** While a wallet holds the QR
+  (`'IN_FLIGHT'`) the row reads `isQrClaimed` `true`: take the QR down and show "payment pending".
+  If that payment ended `'RETRY'` the QR is payable again and the row reads `isQrClaimed` `false`:
+  tell the merchant nothing was charged and show the QR again or a new one. On `'DECLINED'`, the
+  QR can't be paid again.
   Create a new QR with `createPaymentContext` for the same order id. That is allowed after a decline,
   failure or retry; it is refused with `94` / `'DUPLICATE_MERCHANT_ORDER_ID'` only while the order
   is `'APPROVED'`, `'ACCEPTED'` or `'PENDING'`.
@@ -1893,7 +1938,7 @@ const sub = softpos.observeTransactionResolved((e) => {
   else showNotCompleted(e.reason);                            // FAILED / CREDIT_FAILED: the debit was reversed
 });
 
-// Merchant QR: in your contextStatus poll, while the context is not settled
+// Merchant QR: in your watch of the sale's stored row
 const row = await softpos.getTransaction(txRef);
 if (row?.status === 'ACCEPTED') {
   hideQr();                                // it can no longer be paid
@@ -1903,7 +1948,7 @@ if (row?.status === 'ACCEPTED') {
 
 **A merchant QR.** While the customer's push is only accepted the context is not settled: `isSettled`
 stays `false`, and the QR can no longer be paid. The SDK writes `ACCEPTED` onto the stored row, so read
-the row (`softpos.getTransaction(reference)`) while you poll, take the QR down, and show the accepted state.
+the row (`softpos.getTransaction(reference)`) while the QR is up, take the QR down, and show the accepted state.
 
 **`TRANSACTION_IN_PROCESS_ESCALATED`** can replace the reason on an accepted payment that automated
 reconciliation has handed to a person. The status stays `ACCEPTED`: keep showing it as accepted, tell
@@ -2547,9 +2592,10 @@ means the call has no response code by design.
 Some things are not outcomes of a call and have their own vocabularies:
 
 - `softpos.contextStatus`'s `value.state` (`'PENDING'` → `'IN_FLIGHT'` → `'APPROVED'` /
-  `'DECLINED'` / `'EXPIRED'`) is the **QR's** lifecycle, not a call's outcome. Keep polling while
-  it is `PENDING` / `IN_FLIGHT`; stop on `APPROVED` / `DECLINED` (`isSettled`); offer a fresh QR on
-  `EXPIRED`.
+  `'DECLINED'` / `'EXPIRED'`) is the **QR's** lifecycle, not a call's outcome. The SDK reads it
+  for a displayed QR and writes it onto the sale's stored row; your screen reads the row
+  (`isQrClaimed` is `true` while it is `IN_FLIGHT`) rather than asking for the state itself. Offer
+  a fresh QR on `EXPIRED`.
 - `wallet.observeTapEvents`'s `transactionCompleted` status (`'APPROVED'` / `'DECLINED'` / `'ERROR'`,
   Android only) is the **offline leg** — what the card told the terminal — not the issuer's
   authorisation. That lands on the history row with the full triple.

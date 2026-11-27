@@ -17,7 +17,8 @@ import type { RootStackParamList } from '../../App';
 import { CANNOT_CANCEL_MESSAGE, cancelAction, cancelRefusedTooLate, isCancelledOutcome } from '../cancel';
 import {
   acceptedToParams,
-  contextSettlementToParams,
+  claimedPendingToParams,
+  qrSaleSettledToParams,
   cpmChargeToParams,
   DUPLICATE_MERCHANT_ORDER_ID,
   duplicateOrderMessage,
@@ -25,6 +26,7 @@ import {
   notSentToParams,
   tapResultToParams,
 } from '../paymentResult';
+import { QR_ROW_WATCH_MS, merchantQrState } from '../qrRowStates';
 import { Scanner } from '../Scanner';
 import { theme } from '../theme';
 import { QrTile, Busy, Button, Field, formatAmount, FormScrollView, Section } from '../ui';
@@ -69,7 +71,7 @@ export function GetPaidScreen({
   const [mpmExpired, setMpmExpired] = useState(false);
   const [cpm, setCpm] = useState<ScannedCustomerQr | null>(null);
   const [lastApprovedRef, setLastApprovedRef] = useState<string | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const rowWatchRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // The amount the live rail was started with. The result must show what was charged,
   // not whatever is in the amount field by the time the outcome lands.
   const chargedRef = useRef(0);
@@ -172,7 +174,7 @@ export function GetPaidScreen({
   // outcome; an answer arriving after the result screen is gone still lands in Transactions.
 
   useEffect(() => () => {
-    if (pollRef.current) clearInterval(pollRef.current);
+    if (rowWatchRef.current) clearInterval(rowWatchRef.current);
   }, []);
 
   const minorUnits = Math.round(Number(amount) * 100);
@@ -258,9 +260,10 @@ export function GetPaidScreen({
       // An expired get-paid QR must stop being shown — it is no longer chargeable. The callback
       // fires once; a new create replaces it and cancelQrExpiry() (on teardown) stops it.
       const qr = await softpos.createPaymentContext(minorUnits, undefined, orderId, () => {
+        // The row watch below keeps running: a wallet that claimed the code just before it
+        // expired still shows as a pending payment when the row says so.
         setMpmExpired(true);
         setMpmState('EXPIRED');
-        if (pollRef.current) clearInterval(pollRef.current);
       });
       inFlightOrderIdRef.current = null;
       setCancelRefused(false);
@@ -292,45 +295,42 @@ export function GetPaidScreen({
       setMpmState('PENDING');
       setMpmExpired(false);
       setRail('mpm');
-      pollRef.current = setInterval(async () => {
-        // A poll that could not be made carries a failureReason and no value: just ask again.
-        const status = (await softpos.contextStatus(txRef).catch(() => null))?.value;
-        if (!status) return;
-        setMpmState(status.state);
-        // An expired code is not an outcome: blank the QR and stay here with the
-        // renewal action, like the native QR page. Only a settled push is a result.
-        if (status.state === 'EXPIRED') {
+      // Watch the sale's stored row until the QR is used or gone. The SDK checks the QR with the
+      // gateway by itself, as often as the gateway asks it to, and writes each answer onto the
+      // row. This timer reads the phone's own store and sends nothing.
+      rowWatchRef.current = setInterval(async () => {
+        // `undefined`: the read itself failed, which says nothing about the row.
+        const row = await softpos.getTransaction(txRef).catch(() => undefined);
+        if (row === undefined || !rowWatchRef.current) return;
+        const state = merchantQrState(row);
+        if (state === 'WAITING') return;
+        clearInterval(rowWatchRef.current);
+        rowWatchRef.current = null;
+        // The QR expired unpaid: the SDK drops the row, because no payment happened. Not an
+        // outcome: blank the QR and stay here with the renewal action, like the native QR page.
+        if (state === 'GONE' || !row) {
           setMpmExpired(true);
-          if (pollRef.current) clearInterval(pollRef.current);
+          setMpmState('EXPIRED');
           return;
         }
-        if (!status.isSettled) {
-          // Not settled. The customer's bank may have accepted the push (debited, credit queued):
-          // the SDK puts that on the stored row, so read it. The QR comes down and the result
-          // screen waits for the final status.
-          const row = await softpos.getTransaction(txRef).catch(() => null);
-          if (row?.status !== 'ACCEPTED' || !pollRef.current) return;
-          clearInterval(pollRef.current);
-          pollRef.current = null;
-          setRail('idle');
-          setMpmQr(null);
-          softpos.cancelQrExpiry().catch(() => {});
+        // The code is used: take it down, and stop the SDK expiry timer so it cannot fire
+        // behind the result.
+        setRail('idle');
+        setMpmQr(null);
+        softpos.cancelQrExpiry().catch(() => {});
+        if (state === 'ACCEPTED') {
+          // The customer's bank accepted the push (debited, credit queued). Not final: the
+          // result screen waits for the final status.
           navigation.navigate('PaymentResult', acceptedToParams(txRef, null, chargedRef.current));
-          return;
+        } else if (state === 'CLAIMED_PENDING') {
+          // A wallet has claimed the QR and its payment has no outcome yet: nobody else can pay
+          // this code, so it comes down and the result screen waits for the outcome.
+          navigation.navigate('PaymentResult', claimedPendingToParams(txRef, chargedRef.current));
+        } else {
+          if (row.status === 'APPROVED') setLastApprovedRef(txRef);
+          navigation.navigate('PaymentResult', qrSaleSettledToParams(row, chargedRef.current));
         }
-        if (status.isSettled) {
-          if (pollRef.current) clearInterval(pollRef.current);
-          if (status.isApproved) setLastApprovedRef(txRef);
-          setRail('idle');
-          setMpmQr(null);
-          // The code is spent — stop the SDK expiry timer so it cannot fire behind the result.
-          softpos.cancelQrExpiry().catch(() => {});
-          navigation.navigate(
-            'PaymentResult',
-            contextSettlementToParams(status, chargedRef.current)
-          );
-        }
-      }, 2000);
+      }, QR_ROW_WATCH_MS);
     } catch (e) {
       // Only a setup mistake rejects.
       inFlightOrderIdRef.current = null;
@@ -340,7 +340,8 @@ export function GetPaidScreen({
   };
 
   const closeMpm = async () => {
-    if (pollRef.current) clearInterval(pollRef.current);
+    if (rowWatchRef.current) clearInterval(rowWatchRef.current);
+    rowWatchRef.current = null;
     await softpos.cancelQrExpiry().catch(() => {});
     setMpmQr(null);
     setMpmExpired(false);

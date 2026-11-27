@@ -7,10 +7,12 @@ import { softpos } from 'veyra-sdk-react-native';
 import type { RootStackParamList } from '../../App';
 import {
   AUTO_RETURN_MS,
+  CLAIM_RELEASED,
   resolutionOf,
   type PaymentResolution,
   type PaymentResultOutcome,
 } from '../paymentResult';
+import { QR_ROW_WATCH_MS, merchantQrState } from '../qrRowStates';
 import { theme } from '../theme';
 import { Button, formatAmount } from '../ui';
 
@@ -64,6 +66,7 @@ export function PaymentResultScreen({
     details,
     receiptFor,
     resolvesFor,
+    claimedQr,
     creditConfirmation: creditConfirmationParam,
   } = route.params;
 
@@ -96,11 +99,35 @@ export function PaymentResultScreen({
     };
   }, [resolvesFor]);
 
+  // A claimed merchant QR (claimed-PENDING) is also watched on its stored row. The event above
+  // never fires for a claim that is released (the wallet's payment was never sent to its bank),
+  // and the row is where the SDK says so. A read of the phone's own store: nothing is sent.
+  useEffect(() => {
+    if (!resolvesFor || !claimedQr) return;
+    const timer = setInterval(async () => {
+      // `undefined`: the read itself failed, which says nothing about the row.
+      const row = await softpos.getTransaction(resolvesFor).catch(() => undefined);
+      if (row === undefined) return;
+      const state = merchantQrState(row);
+      if (state === 'CLAIMED_PENDING') return;
+      if (state === 'WAITING' || state === 'GONE') {
+        setResolved(CLAIM_RELEASED);
+      } else {
+        const next = resolutionOf(row?.status, row?.responseStatusReason);
+        if (next) setResolved(next);
+      }
+      // Accepted is not final: keep watching until the final status.
+      if (state !== 'ACCEPTED') clearInterval(timer);
+    }, QR_ROW_WATCH_MS);
+    return () => clearInterval(timer);
+  }, [resolvesFor, claimedQr]);
+
   // What the screen shows now: the outcome it opened with, or where the waited-on sale has got to.
   const shownOutcome = resolved?.outcome ?? outcome;
   const look = LOOK[shownOutcome];
   // Accepted is not final: hold the screen, and offer no receipt and no credit confirmation.
-  const awaitingApproval = shownOutcome === 'accepted';
+  // So is a claimed merchant QR whose payment has no outcome yet.
+  const awaitingApproval = shownOutcome === 'accepted' || (!!claimedQr && !resolved);
   // A waited-on sale that ended approved or refused is recorded, so its receipt can be shown.
   const shownReceiptFor =
     receiptFor ??

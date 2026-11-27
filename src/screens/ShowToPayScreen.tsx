@@ -7,16 +7,19 @@ import { wallet, usePaySession, type PaymentQr, type VeyraError } from 'veyra-sd
 import type { RootStackParamList } from '../../App';
 import {
   ACCEPTED_WALLET_MESSAGE,
+  CHARGED_PENDING_WALLET_MESSAGE,
   DEVICE_NOT_BOUND_MESSAGE,
   DEVICE_NOT_BOUND_TITLE,
 } from '../paymentResult';
+import { QR_ROW_WATCH_MS, shownQrState } from '../qrRowStates';
 import { theme } from '../theme';
 import { QrTile, Busy, Button, formatAmount, Field, Section } from '../ui';
 
 /**
- * Show a payment QR for the active card (consumer-presented / CPM). While the code is
- * up, the screen polls for the settled outcome so the payer sees Paid/Declined without
- * leaving; an expired code blanks (never scannable) with a renewal action.
+ * Show a payment QR for the active card (consumer-presented / CPM). While the code is up, the
+ * screen watches the payment's stored row, so the payer sees it charged, then Paid/Declined,
+ * without leaving. The SDK does the asking; this screen sends nothing. An expired code blanks
+ * (never scannable) with a renewal action.
  */
 export function ShowToPayScreen({
   navigation,
@@ -53,33 +56,47 @@ export function ShowToPayScreen({
       const left = Math.max(0, Math.round((rendered.expiresAtEpochMillis - Date.now()) / 1000));
       setSecondsLeft(left);
     }, 1000);
-    // Settle poll: check THIS payment by its hash only — one request per check.
-    // reconcilePendingTransactions() asks about every pending payment on the device, so calling
-    // it on a 3s loop sends a burst of requests each time and gets the wallet throttled (429).
+    // Watch THIS payment's stored row while the code is up. The SDK checks the payment with the
+    // gateway by itself, as often as the gateway asks it to, and keeps the row up to date; this
+    // timer reads the phone's own store and sends nothing. The hash is unique per render, so only
+    // the row for this QR can move the display.
     const hash = rendered.transactionHash;
-    if (!hash) return;
+    const token = rendered.tokenUniqueReference;
+    if (!hash || !token) return;
+    // The code is used once a merchant has charged it: take it down while the wait goes on.
+    const takeQrDown = (message: string) => {
+      if (tickRef.current) clearInterval(tickRef.current);
+      tickRef.current = null;
+      wallet.cancelQrExpiry().catch(() => {});
+      setOutcome(message);
+    };
     settleRef.current = setInterval(async () => {
-      // A check that could not be made carries a failureReason; this loop just asks again.
-      const lookup = await wallet.refreshTransactionStatus(hash).catch(() => null);
-      const mine = lookup?.value;
-      // The row stays PENDING until the merchant charges — only a final status settles.
-      const status = mine?.authorizationStatus;
-      if (mine && (status === 'APPROVED' || status === 'DECLINED' || status === 'FAILED')) {
-        stopTimers();
-        setOutcome(
-          status === 'APPROVED'
-            ? `Paid — ${mine.merchantName}`
-            : `Declined — ${mine.merchantName}`
-        );
-      } else if (mine && status === 'ACCEPTED') {
-        // The merchant charged this QR and the bank accepted it: debited, credit queued. Not
-        // final, but the QR is used: take it down and keep asking until the final status.
-        if (tickRef.current) clearInterval(tickRef.current);
-        tickRef.current = null;
-        wallet.cancelQrExpiry().catch(() => {});
-        setOutcome(ACCEPTED_WALLET_MESSAGE);
+      // A local read. The newest rows are enough: this payment was recorded moments ago.
+      const rows = await wallet.getTransactions(token, 20).catch(() => null);
+      const mine = rows?.find((r) => r.transactionHash?.toLowerCase() === hash.toLowerCase());
+      if (!mine) return;
+      switch (shownQrState(mine)) {
+        case 'WAITING':
+          // Not charged yet: the QR stays up to be scanned.
+          return;
+        case 'CHARGED_PENDING':
+          // The merchant's charge has reached the gateway and has no outcome yet.
+          takeQrDown(CHARGED_PENDING_WALLET_MESSAGE);
+          return;
+        case 'ACCEPTED':
+          // Debited, credit queued. Not final: keep watching until the final status.
+          takeQrDown(ACCEPTED_WALLET_MESSAGE);
+          return;
+        case 'FINAL':
+          stopTimers();
+          wallet.cancelQrExpiry().catch(() => {});
+          setOutcome(
+            mine.authorizationStatus === 'APPROVED'
+              ? `Paid — ${mine.merchantName}`
+              : `Declined — ${mine.merchantName}`
+          );
       }
-    }, 3000);
+    }, QR_ROW_WATCH_MS);
   };
 
   const show = async () => {
@@ -90,8 +107,11 @@ export function ShowToPayScreen({
       // once per render — so a regenerate after expiry asks again on its own. onExpired fires once,
       // for this QR only; a new render replaces it.
       const rendered = await wallet.showQrToPay(Math.round(Number(amount) * 100), () => {
+        // The row watch keeps running: a merchant who charged the code just before it expired
+        // still shows as a pending payment when the row says so.
         setExpired(true);
-        stopTimers();
+        if (tickRef.current) clearInterval(tickRef.current);
+        tickRef.current = null;
       });
       if (rendered.responseStatus !== 'APPROVED' || !rendered.payload) {
         // No QR was made (NOT_SENT: nothing left the phone). The customer dismissing the sheet is

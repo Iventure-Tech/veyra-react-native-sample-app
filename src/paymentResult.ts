@@ -4,7 +4,6 @@ import type {
   TapResult,
   OrderPaymentStatus,
   OriginalPayment,
-  PaymentContextStatus,
   PaymentOutcome,
   ResponseStatus,
   VeyraLookup,
@@ -343,31 +342,6 @@ export function tapResultToParams(
         resolvesFor: reference,
       };
   }
-}
-
-/**
- * A merchant-presented QR the customer pushed to. Only called once the context has
- * settled — an expired code is not a result, it stays on the QR screen with a renewal
- * action, exactly as the native samples leave it.
- */
-export function contextSettlementToParams(
-  status: PaymentContextStatus,
-  amountMinorUnits: number
-): PaymentResultParams {
-  return {
-    outcome: status.isApproved ? 'approved' : 'declined',
-    title: status.isApproved ? 'Payment Successful' : 'Declined',
-    message: 'Customer paid by QR',
-    amountMinorUnits,
-    details: lines(`Ref: ${status.txRef}`, `Response: ${status.responseCode ?? '-'}`),
-    receiptFor: status.isApproved ? status.txRef : undefined,
-    // The context settle carries no credit fields — `supported: null` makes the result
-    // screen watch the SDK's stored row (which learns them from the transaction-status
-    // rail moments after the settle) and wait once the flag turns up true.
-    creditConfirmation: status.isApproved
-      ? { reference: status.txRef, creditTransactionId: null, supported: null }
-      : undefined,
-  };
 }
 
 /**

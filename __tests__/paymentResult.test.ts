@@ -8,7 +8,6 @@ import type {
   CustomerQrChargeOutcome,
   TapResult,
   OrderPaymentStatus,
-  PaymentContextStatus,
   PaymentOutcome,
 } from 'veyra-sdk-react-native';
 import {
@@ -17,7 +16,6 @@ import {
   AUTO_RETURN_MS,
   DEVICE_NOT_BOUND_MESSAGE,
   DEVICE_NOT_BOUND_TITLE,
-  contextSettlementToParams,
   cpmChargeToParams,
   acceptedToParams,
   duplicateOrderMessage,
@@ -169,48 +167,6 @@ describe('tapResultToParams', () => {
   it('treats a pending or unknown status as pending, never as a failure', () => {
     expect(tapResultToParams(tap(), 500).outcome).toBe('pending');
     expect(tapResultToParams(tap({ responseStatus: 'SETTLING' }), 500).outcome).toBe('pending');
-  });
-});
-
-describe('contextSettlementToParams', () => {
-  const settled = (over: Partial<PaymentContextStatus> = {}): PaymentContextStatus => ({
-    txRef: 'TX-1',
-    state: 'APPROVED',
-    responseCode: '00',
-    transactionHash: null,
-    isSettled: true,
-    isApproved: true,
-    ...over,
-  });
-
-  it('approves a settled push and offers its receipt', () => {
-    const params = contextSettlementToParams(settled(), 1_000_00);
-    expect(params.outcome).toBe('approved');
-    expect(params.receiptFor).toBe('TX-1');
-    expect(params.details).toEqual(['Ref: TX-1', 'Response: 00']);
-    // The contexts rail carries no credit fields: supported is unknown (null), so the
-    // result screen watches the stored row rather than waiting outright.
-    expect(params.creditConfirmation).toEqual({
-      reference: 'TX-1',
-      creditTransactionId: null,
-      supported: null,
-    });
-  });
-
-  it('declines without a receipt when the push settled unapproved', () => {
-    const params = contextSettlementToParams(
-      settled({ state: 'DECLINED', isApproved: false, responseCode: '05' }),
-      100
-    );
-    expect(params.outcome).toBe('declined');
-    expect(params.receiptFor).toBeUndefined();
-    expect(params.creditConfirmation).toBeUndefined();
-  });
-
-  it('shows a dash rather than "null" when the gateway sent no response code', () => {
-    expect(contextSettlementToParams(settled({ responseCode: null }), 100).details).toContain(
-      'Response: -'
-    );
   });
 });
 
